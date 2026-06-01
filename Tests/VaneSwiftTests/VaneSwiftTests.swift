@@ -22,9 +22,18 @@ import Testing
 #endif
 
 struct VaneSwiftTests {
-    private let baseURL = "http://127.0.0.1:8000"
+    private let baseURL = ProcessInfo.processInfo.environment["VANE_TEST_BASE_URL"]
     private let warmups = 10
     private let iterations = 100
+
+    private func integrationBaseURL() -> String? {
+        guard let baseURL, baseURL.hasPrefix("https://") else {
+            print("Skipping Vane integration test. Set VANE_TEST_BASE_URL to an HTTPS endpoint with HTTP/3 enabled.")
+            return nil
+        }
+
+        return baseURL
+    }
 
     private func runBenchmark(
         summaryName: String,
@@ -82,6 +91,7 @@ struct VaneSwiftTests {
 
     @Test
     func get() async throws {
+        guard let baseURL = integrationBaseURL() else { return }
         let session = try VaneSession()
         let response = try await session.get("\(baseURL)/get")
         print("response[get]: \(response)")
@@ -89,6 +99,7 @@ struct VaneSwiftTests {
 
     @Test
     func post() async throws {
+        guard let baseURL = integrationBaseURL() else { return }
         let config = VaneConfigurationBuilder()
             .baseURL(baseURL)
             .defaultHeaders(["Authorization": "Bearer token"])
@@ -103,6 +114,7 @@ struct VaneSwiftTests {
 
     @Test
     func benchmarkVaneHTTPMethods() async throws {
+        guard let baseURL = integrationBaseURL() else { return }
         let config = VaneConfigurationBuilder()
             .baseURL(baseURL)
             .defaultHeaders(["Authorization": "Bearer token"])
@@ -147,6 +159,7 @@ struct VaneSwiftTests {
 
     @Test
     func benchmarkAlamofireHTTPMethods() async throws {
+        guard let baseURL = integrationBaseURL() else { return }
         #if canImport(Alamofire)
             let configuration = URLSessionConfiguration.default
             configuration.timeoutIntervalForRequest = 30
