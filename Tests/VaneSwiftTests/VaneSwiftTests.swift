@@ -23,6 +23,7 @@ import Testing
 
 struct VaneSwiftTests {
     private let baseURL = ProcessInfo.processInfo.environment["VANE_TEST_BASE_URL"]
+    private let runBenchmarks = ProcessInfo.processInfo.environment["VANE_RUN_BENCHMARKS"] == "1"
     private let warmups = 10
     private let iterations = 100
 
@@ -33,6 +34,15 @@ struct VaneSwiftTests {
         }
 
         return baseURL
+    }
+
+    private func shouldRunBenchmarks() -> Bool {
+        guard runBenchmarks else {
+            print("Skipping Vane benchmark tests. Set VANE_RUN_BENCHMARKS=1 to enable them.")
+            return false
+        }
+
+        return true
     }
 
     private func runBenchmark(
@@ -98,6 +108,19 @@ struct VaneSwiftTests {
     }
 
     @Test
+    func http3OnlyGet() async throws {
+        guard let baseURL = integrationBaseURL() else { return }
+        let config = VaneConfigurationBuilder()
+            .http3Only()
+            .timeout(30)
+            .build()
+        let session = try VaneSession(configuration: config)
+        let response = try await session.get("\(baseURL)/get")
+
+        #expect(response.isSuccess)
+    }
+
+    @Test
     func post() async throws {
         guard let baseURL = integrationBaseURL() else { return }
         let config = VaneConfigurationBuilder()
@@ -113,8 +136,101 @@ struct VaneSwiftTests {
     }
 
     @Test
+    func interceptorsApplyToRequestBuilderPaths() async throws {
+        let config = VaneConfigurationBuilder()
+            .http3Only()
+            .build()
+        let session = try VaneSession(
+            configuration: config,
+            requestInterceptors: [
+                { request in
+                    var request = request
+                    request.headers["Authorization"] = "Bearer intercepted"
+                    request.queryParams["source"] = "interceptor"
+                    return request
+                }
+            ],
+            responseInterceptors: [
+                { response in
+                    var response = response
+                    response.headers["x-intercepted"] = "true"
+                    return response
+                }
+            ],
+            errorInterceptors: [
+                { _ in
+                    VaneResponse(
+                        statusCode: 299,
+                        headers: [:],
+                        body: Data("synthetic".utf8),
+                        isSuccess: true,
+                        url: "interceptor://synthetic"
+                    )
+                }
+            ]
+        )
+
+        let response = try await session.request("http://example.com/get")
+            .header("Accept", "application/json")
+            .execute()
+
+        #expect(response.statusCode == 299)
+        #expect(response.headers["x-intercepted"] == "true")
+        #expect(String(data: response.body, encoding: .utf8) == "synthetic")
+    }
+
+    @Test
+    func configurationBuilderSetsProxyOptions() throws {
+        let config = VaneConfigurationBuilder()
+            .proxy("http://proxy.example.com:8080", authorization: "Basic dXNlcjpwYXNz")
+            .build()
+
+        #expect(config.proxyUrl == "http://proxy.example.com:8080")
+        #expect(config.proxyAuthorization == "Basic dXNlcjpwYXNz")
+    }
+
+    @Test
+    func requestInterceptorFailuresProduceStableErrors() async throws {
+        enum TestInterceptorError: Error {
+            case blocked
+        }
+
+        let session = try VaneSession(
+            requestInterceptors: [
+                { _ in throw TestInterceptorError.blocked }
+            ]
+        )
+
+        do {
+            _ = try await session.get("http://example.com/get")
+            Issue.record("Expected request interceptor to throw")
+        } catch TestInterceptorError.blocked {
+            return
+        }
+    }
+
+    @Test
+    func pooledHttp3Requests() async throws {
+        guard let baseURL = integrationBaseURL() else { return }
+        let config = VaneConfigurationBuilder()
+            .baseURL(baseURL)
+            .connectionPooling(enabled: true, maxIdleConnections: 2, idleTimeoutSeconds: 30)
+            .retry(maxAttempts: 2)
+            .timeout(30)
+            .build()
+
+        let session = try VaneSession(configuration: config)
+        let first = try await session.get("/get")
+        let second = try await session.get("/get")
+
+        #expect(first.isSuccess)
+        #expect(second.isSuccess)
+    }
+
+    @Test
     func benchmarkVaneHTTPMethods() async throws {
         guard let baseURL = integrationBaseURL() else { return }
+        guard shouldRunBenchmarks() else { return }
         let config = VaneConfigurationBuilder()
             .baseURL(baseURL)
             .defaultHeaders(["Authorization": "Bearer token"])
@@ -160,6 +276,7 @@ struct VaneSwiftTests {
     @Test
     func benchmarkAlamofireHTTPMethods() async throws {
         guard let baseURL = integrationBaseURL() else { return }
+        guard shouldRunBenchmarks() else { return }
         #if canImport(Alamofire)
             let configuration = URLSessionConfiguration.default
             configuration.timeoutIntervalForRequest = 30

@@ -8,35 +8,35 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(vaneFFI)
-    import vaneFFI
+import vaneFFI
 #endif
 
-extension RustBuffer {
+fileprivate extension RustBuffer {
     // Allocate a new buffer, copying the contents of a `UInt8` array.
-    fileprivate init(bytes: [UInt8]) {
+    init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
             RustBuffer.from(ptr)
         }
         self.init(capacity: rbuf.capacity, len: rbuf.len, data: rbuf.data)
     }
 
-    fileprivate static func empty() -> RustBuffer {
-        RustBuffer(capacity: 0, len: 0, data: nil)
+    static func empty() -> RustBuffer {
+        RustBuffer(capacity: 0, len:0, data: nil)
     }
 
-    fileprivate static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
+    static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
         try! rustCall { ffi_vane_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
     // Frees the buffer in place.
     // The buffer must not be used after this is called.
-    fileprivate func deallocate() {
+    func deallocate() {
         try! rustCall { ffi_vane_rustbuffer_free(self, $0) }
     }
 }
 
-extension ForeignBytes {
-    fileprivate init(bufferPointer: UnsafeBufferPointer<UInt8>) {
+fileprivate extension ForeignBytes {
+    init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
 }
@@ -48,8 +48,8 @@ extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a library of its own.
 
-extension Data {
-    fileprivate init(rustBuffer: RustBuffer) {
+fileprivate extension Data {
+    init(rustBuffer: RustBuffer) {
         self.init(
             bytesNoCopy: rustBuffer.data!,
             count: Int(rustBuffer.len),
@@ -72,16 +72,14 @@ extension Data {
 //
 // Instead, the read() method and these helper functions input a tuple of data
 
-private func createReader(data: Data) -> (data: Data, offset: Data.Index) {
+fileprivate func createReader(data: Data) -> (data: Data, offset: Data.Index) {
     (data: data, offset: 0)
 }
 
 // Reads an integer at the current offset, in big-endian order, and advances
 // the offset on success. Throws if reading the integer would move the
 // offset past the end of the buffer.
-private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws
-    -> T
-{
+fileprivate func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws -> T {
     let range = reader.offset..<reader.offset + MemoryLayout<T>.size
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
@@ -92,17 +90,15 @@ private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: 
         return value as! T
     }
     var value: T = 0
-    let _ = withUnsafeMutableBytes(of: &value, { reader.data.copyBytes(to: $0, from: range) })
+    let _ = withUnsafeMutableBytes(of: &value, { reader.data.copyBytes(to: $0, from: range)})
     reader.offset = range.upperBound
     return value.bigEndian
 }
 
 // Reads an arbitrary number of bytes, to be used to read
 // raw bytes, this is useful when lifting strings
-private func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws
-    -> [UInt8]
-{
-    let range = reader.offset..<(reader.offset + count)
+fileprivate func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws -> Array<UInt8> {
+    let range = reader.offset..<(reader.offset+count)
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
     }
@@ -115,17 +111,17 @@ private func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: 
 }
 
 // Reads a float at the current offset.
-private func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
+fileprivate func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
     return Float(bitPattern: try readInt(&reader))
 }
 
 // Reads a float at the current offset.
-private func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
+fileprivate func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
     return Double(bitPattern: try readInt(&reader))
 }
 
 // Indicates if the offset has reached the end of the buffer.
-private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
+fileprivate func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
     return reader.offset < reader.data.count
 }
 
@@ -133,12 +129,11 @@ private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
 // struct, but we use standalone functions instead in order to make external
 // types work.  See the above discussion on Readers for details.
 
-private func createWriter() -> [UInt8] {
+fileprivate func createWriter() -> [UInt8] {
     return []
 }
 
-private func writeBytes<S>(_ writer: inout [UInt8], _ byteArr: S)
-where S: Sequence, S.Element == UInt8 {
+fileprivate func writeBytes<S>(_ writer: inout [UInt8], _ byteArr: S) where S: Sequence, S.Element == UInt8 {
     writer.append(contentsOf: byteArr)
 }
 
@@ -146,22 +141,22 @@ where S: Sequence, S.Element == UInt8 {
 //
 // Warning: make sure what you are trying to write
 // is in the correct type!
-private func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
+fileprivate func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
     var value = value.bigEndian
     withUnsafeBytes(of: &value) { writer.append(contentsOf: $0) }
 }
 
-private func writeFloat(_ writer: inout [UInt8], _ value: Float) {
+fileprivate func writeFloat(_ writer: inout [UInt8], _ value: Float) {
     writeInt(&writer, value.bitPattern)
 }
 
-private func writeDouble(_ writer: inout [UInt8], _ value: Double) {
+fileprivate func writeDouble(_ writer: inout [UInt8], _ value: Double) {
     writeInt(&writer, value.bitPattern)
 }
 
 // Protocol for types that transfer other types across the FFI. This is
 // analogous to the Rust trait of the same name.
-private protocol FfiConverter {
+fileprivate protocol FfiConverter {
     associatedtype FfiType
     associatedtype SwiftType
 
@@ -172,19 +167,19 @@ private protocol FfiConverter {
 }
 
 // Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType {}
+fileprivate protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType { }
 
 extension FfiConverterPrimitive {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ value: FfiType) throws -> SwiftType {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> FfiType {
         return value
     }
@@ -192,12 +187,12 @@ extension FfiConverterPrimitive {
 
 // Types conforming to `FfiConverterRustBuffer` lift and lower into a `RustBuffer`.
 // Used for complex types where it's hard to write a custom lift/lower.
-private protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
+fileprivate protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
 
 extension FfiConverterRustBuffer {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ buf: RustBuffer) throws -> SwiftType {
         var reader = createReader(data: Data(rustBuffer: buf))
         let value = try read(from: &reader)
@@ -208,18 +203,18 @@ extension FfiConverterRustBuffer {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> RustBuffer {
-        var writer = createWriter()
-        write(value, into: &writer)
-        return RustBuffer(bytes: writer)
+          var writer = createWriter()
+          write(value, into: &writer)
+          return RustBuffer(bytes: writer)
     }
 }
 // An error type for FFI errors. These errors occur at the UniFFI level, not
 // the library level.
-private enum UniffiInternalError: LocalizedError {
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -232,8 +227,7 @@ private enum UniffiInternalError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .bufferOverflow:
-            return "Reading the requested value would read past the end of the buffer"
+        case .bufferOverflow: return "Reading the requested value would read past the end of the buffer"
         case .incompleteData: return "The buffer still has data after lifting its containing value"
         case .unexpectedOptionalTag: return "Unexpected optional tag; should be 0 or 1"
         case .unexpectedEnumCase: return "Raw enum value doesn't match any cases"
@@ -241,26 +235,26 @@ private enum UniffiInternalError: LocalizedError {
         case .unexpectedRustCallStatusCode: return "Unexpected RustCallStatus code"
         case .unexpectedRustCallError: return "CALL_ERROR but no errorClass specified"
         case .unexpectedStaleHandle: return "The object in the handle map has been dropped already"
-        case .rustPanic(let message): return message
+        case let .rustPanic(message): return message
         }
     }
 }
 
-extension NSLock {
-    fileprivate func withLock<T>(f: () throws -> T) rethrows -> T {
+fileprivate extension NSLock {
+    func withLock<T>(f: () throws -> T) rethrows -> T {
         self.lock()
         defer { self.unlock() }
         return try f()
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_UNEXPECTED_ERROR: Int8 = 2
-private let CALL_CANCELLED: Int8 = 3
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_UNEXPECTED_ERROR: Int8 = 2
+fileprivate let CALL_CANCELLED: Int8 = 3
 
-extension RustCallStatus {
-    fileprivate init() {
+fileprivate extension RustCallStatus {
+    init() {
         self.init(
             code: CALL_SUCCESS,
             errorBuf: RustBuffer.init(
@@ -279,8 +273,7 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
 
 private func rustCallWithError<T, E: Swift.Error>(
     _ errorHandler: @escaping (RustBuffer) throws -> E,
-    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
-) throws -> T {
+    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: errorHandler)
 }
 
@@ -300,40 +293,40 @@ private func uniffiCheckCallStatus<E: Swift.Error>(
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws {
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return
+        case CALL_SUCCESS:
+            return
 
-    case CALL_ERROR:
-        if let errorHandler = errorHandler {
-            throw try errorHandler(callStatus.errorBuf)
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.unexpectedRustCallError
-        }
+        case CALL_ERROR:
+            if let errorHandler = errorHandler {
+                throw try errorHandler(callStatus.errorBuf)
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.unexpectedRustCallError
+            }
 
-    case CALL_UNEXPECTED_ERROR:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw UniffiInternalError.rustPanic(try FfiConverterString.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_UNEXPECTED_ERROR:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try FfiConverterString.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    case CALL_CANCELLED:
-        fatalError("Cancellation not supported yet")
+        case CALL_CANCELLED:
+            fatalError("Cancellation not supported yet")
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
 
 private func uniffiTraitInterfaceCall<T>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void
+    writeReturn: (T) -> ()
 ) {
     do {
         try writeReturn(makeCall())
@@ -346,7 +339,7 @@ private func uniffiTraitInterfaceCall<T>(
 private func uniffiTraitInterfaceCallWithError<T, E>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void,
+    writeReturn: (T) -> (),
     lowerError: (E) -> RustBuffer
 ) {
     do {
@@ -359,7 +352,7 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
-private final class UniffiHandleMap<T>: @unchecked Sendable {
+fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
     // All mutation happens with this lock held, which is why we implement @unchecked Sendable.
     private let lock = NSLock()
     private var map: [UInt64: T] = [:]
@@ -374,7 +367,7 @@ private final class UniffiHandleMap<T>: @unchecked Sendable {
         }
     }
 
-    func get(handle: UInt64) throws -> T {
+     func get(handle: UInt64) throws -> T {
         try lock.withLock {
             guard let obj = map[handle] else {
                 throw UniffiInternalError.unexpectedStaleHandle
@@ -394,16 +387,20 @@ private final class UniffiHandleMap<T>: @unchecked Sendable {
     }
 
     var count: Int {
-        map.count
+        get {
+            map.count
+        }
     }
 }
 
+
 // Public interface members begin here.
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterUInt16: FfiConverterPrimitive {
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
     typealias FfiType = UInt16
     typealias SwiftType = UInt16
 
@@ -417,9 +414,9 @@ private struct FfiConverterUInt16: FfiConverterPrimitive {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterUInt64: FfiConverterPrimitive {
+fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
 
@@ -433,9 +430,9 @@ private struct FfiConverterUInt64: FfiConverterPrimitive {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterBool: FfiConverter {
+fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
 
@@ -457,9 +454,9 @@ private struct FfiConverterBool: FfiConverter {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterString: FfiConverter {
+fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
 
@@ -498,9 +495,9 @@ private struct FfiConverterString: FfiConverter {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterData: FfiConverterRustBuffer {
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
     typealias SwiftType = Data
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
@@ -515,28 +512,31 @@ private struct FfiConverterData: FfiConverterRustBuffer {
     }
 }
 
+
+
+
 public protocol VaneClientProtocol: AnyObject, Sendable {
-
-    func deleteRequest(url: String) throws -> VaneResponse
-
-    func executeRequest(request: VaneRequest) throws -> VaneResponse
-
-    func getRequest(url: String) throws -> VaneResponse
-
-    func patchRequest(url: String, body: Data?) throws -> VaneResponse
-
-    func postRequest(url: String, body: Data?) throws -> VaneResponse
-
-    func putRequest(url: String, body: Data?) throws -> VaneResponse
-
+    
+    func deleteRequest(url: String) throws  -> VaneResponse
+    
+    func executeRequest(request: VaneRequest) throws  -> VaneResponse
+    
+    func getRequest(url: String) throws  -> VaneResponse
+    
+    func patchRequest(url: String, body: Data?) throws  -> VaneResponse
+    
+    func postRequest(url: String, body: Data?) throws  -> VaneResponse
+    
+    func putRequest(url: String, body: Data?) throws  -> VaneResponse
+    
 }
 open class VaneClient: VaneClientProtocol, @unchecked Sendable {
     fileprivate let pointer: UnsafeMutableRawPointer!
 
     /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public struct NoPointer {
         public init() {}
     }
@@ -544,9 +544,9 @@ open class VaneClient: VaneClientProtocol, @unchecked Sendable {
     // TODO: We'd like this to be `private` but for Swifty reasons,
     // we can't implement `FfiConverter` without making this `required` and we can't
     // make it `required` without making it `public`.
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
         self.pointer = pointer
     }
@@ -556,16 +556,16 @@ open class VaneClient: VaneClientProtocol, @unchecked Sendable {
     //
     // - Warning:
     //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public init(noPointer: NoPointer) {
         self.pointer = nil
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public func uniffiClonePointer() -> UnsafeMutableRawPointer {
         return try! rustCall { uniffi_vane_fn_clone_vaneclient(self.pointer, $0) }
     }
@@ -579,73 +579,66 @@ open class VaneClient: VaneClientProtocol, @unchecked Sendable {
         try! rustCall { uniffi_vane_fn_free_vaneclient(pointer, $0) }
     }
 
-    open func deleteRequest(url: String) throws -> VaneResponse {
-        return try FfiConverterTypeVaneResponse_lift(
-            try rustCallWithError(FfiConverterTypeVaneError_lift) {
-                uniffi_vane_fn_method_vaneclient_delete_request(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(url), $0
-                )
-            })
-    }
+    
 
-    open func executeRequest(request: VaneRequest) throws -> VaneResponse {
-        return try FfiConverterTypeVaneResponse_lift(
-            try rustCallWithError(FfiConverterTypeVaneError_lift) {
-                uniffi_vane_fn_method_vaneclient_execute_request(
-                    self.uniffiClonePointer(),
-                    FfiConverterTypeVaneRequest_lower(request), $0
-                )
-            })
-    }
-
-    open func getRequest(url: String) throws -> VaneResponse {
-        return try FfiConverterTypeVaneResponse_lift(
-            try rustCallWithError(FfiConverterTypeVaneError_lift) {
-                uniffi_vane_fn_method_vaneclient_get_request(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(url), $0
-                )
-            })
-    }
-
-    open func patchRequest(url: String, body: Data?) throws -> VaneResponse {
-        return try FfiConverterTypeVaneResponse_lift(
-            try rustCallWithError(FfiConverterTypeVaneError_lift) {
-                uniffi_vane_fn_method_vaneclient_patch_request(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(url),
-                    FfiConverterOptionData.lower(body), $0
-                )
-            })
-    }
-
-    open func postRequest(url: String, body: Data?) throws -> VaneResponse {
-        return try FfiConverterTypeVaneResponse_lift(
-            try rustCallWithError(FfiConverterTypeVaneError_lift) {
-                uniffi_vane_fn_method_vaneclient_post_request(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(url),
-                    FfiConverterOptionData.lower(body), $0
-                )
-            })
-    }
-
-    open func putRequest(url: String, body: Data?) throws -> VaneResponse {
-        return try FfiConverterTypeVaneResponse_lift(
-            try rustCallWithError(FfiConverterTypeVaneError_lift) {
-                uniffi_vane_fn_method_vaneclient_put_request(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(url),
-                    FfiConverterOptionData.lower(body), $0
-                )
-            })
-    }
+    
+open func deleteRequest(url: String)throws  -> VaneResponse  {
+    return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_delete_request(self.uniffiClonePointer(),
+        FfiConverterString.lower(url),$0
+    )
+})
+}
+    
+open func executeRequest(request: VaneRequest)throws  -> VaneResponse  {
+    return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_execute_request(self.uniffiClonePointer(),
+        FfiConverterTypeVaneRequest_lower(request),$0
+    )
+})
+}
+    
+open func getRequest(url: String)throws  -> VaneResponse  {
+    return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_get_request(self.uniffiClonePointer(),
+        FfiConverterString.lower(url),$0
+    )
+})
+}
+    
+open func patchRequest(url: String, body: Data?)throws  -> VaneResponse  {
+    return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_patch_request(self.uniffiClonePointer(),
+        FfiConverterString.lower(url),
+        FfiConverterOptionData.lower(body),$0
+    )
+})
+}
+    
+open func postRequest(url: String, body: Data?)throws  -> VaneResponse  {
+    return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_post_request(self.uniffiClonePointer(),
+        FfiConverterString.lower(url),
+        FfiConverterOptionData.lower(body),$0
+    )
+})
+}
+    
+open func putRequest(url: String, body: Data?)throws  -> VaneResponse  {
+    return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_put_request(self.uniffiClonePointer(),
+        FfiConverterString.lower(url),
+        FfiConverterOptionData.lower(body),$0
+    )
+})
+}
+    
 
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaneClient: FfiConverter {
 
@@ -665,7 +658,7 @@ public struct FfiConverterTypeVaneClient: FfiConverter {
         // The Rust code won't compile if a pointer won't fit in a UInt64.
         // We have to go via `UInt` because that's the thing that's the size of a pointer.
         let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if ptr == nil {
+        if (ptr == nil) {
             throw UniffiInternalError.unexpectedNullPointer
         }
         return try lift(ptr!)
@@ -678,52 +671,119 @@ public struct FfiConverterTypeVaneClient: FfiConverter {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-public func FfiConverterTypeVaneClient_lift(_ pointer: UnsafeMutableRawPointer) throws -> VaneClient
-{
+public func FfiConverterTypeVaneClient_lift(_ pointer: UnsafeMutableRawPointer) throws -> VaneClient {
     return try FfiConverterTypeVaneClient.lift(pointer)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneClient_lower(_ value: VaneClient) -> UnsafeMutableRawPointer {
     return FfiConverterTypeVaneClient.lower(value)
 }
 
+
+
+
 public struct VaneClientConfig {
     public var baseUrl: String?
     public var defaultHeaders: [String: String]
+    public var dnsOverrides: [String: String]
+    public var certificatePins: [String: [String]]
+    public var cookiesEnabled: Bool
+    public var connectionPoolEnabled: Bool
+    public var maxIdleConnections: UInt64
+    public var connectionIdleTimeoutSeconds: UInt64
+    public var retryMaxAttempts: UInt64
+    public var retryInitialDelayMillis: UInt64
+    public var retryMaxDelayMillis: UInt64
+    public var retryUnsafeMethods: Bool
+    public var maxRequestBodyBytes: UInt64
+    public var maxResponseBodyBytes: UInt64
     public var timeoutSeconds: UInt64?
     public var followRedirects: Bool
     public var userAgent: String?
+    public var protocolMode: VaneProtocolMode
+    public var proxyUrl: String?
+    public var proxyAuthorization: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(
-        baseUrl: String?, defaultHeaders: [String: String], timeoutSeconds: UInt64?,
-        followRedirects: Bool, userAgent: String?
-    ) {
+    public init(baseUrl: String?, defaultHeaders: [String: String], dnsOverrides: [String: String], certificatePins: [String: [String]], cookiesEnabled: Bool, connectionPoolEnabled: Bool, maxIdleConnections: UInt64, connectionIdleTimeoutSeconds: UInt64, retryMaxAttempts: UInt64, retryInitialDelayMillis: UInt64, retryMaxDelayMillis: UInt64, retryUnsafeMethods: Bool, maxRequestBodyBytes: UInt64, maxResponseBodyBytes: UInt64, timeoutSeconds: UInt64?, followRedirects: Bool, userAgent: String?, protocolMode: VaneProtocolMode, proxyUrl: String?, proxyAuthorization: String?) {
         self.baseUrl = baseUrl
         self.defaultHeaders = defaultHeaders
+        self.dnsOverrides = dnsOverrides
+        self.certificatePins = certificatePins
+        self.cookiesEnabled = cookiesEnabled
+        self.connectionPoolEnabled = connectionPoolEnabled
+        self.maxIdleConnections = maxIdleConnections
+        self.connectionIdleTimeoutSeconds = connectionIdleTimeoutSeconds
+        self.retryMaxAttempts = retryMaxAttempts
+        self.retryInitialDelayMillis = retryInitialDelayMillis
+        self.retryMaxDelayMillis = retryMaxDelayMillis
+        self.retryUnsafeMethods = retryUnsafeMethods
+        self.maxRequestBodyBytes = maxRequestBodyBytes
+        self.maxResponseBodyBytes = maxResponseBodyBytes
         self.timeoutSeconds = timeoutSeconds
         self.followRedirects = followRedirects
         self.userAgent = userAgent
+        self.protocolMode = protocolMode
+        self.proxyUrl = proxyUrl
+        self.proxyAuthorization = proxyAuthorization
     }
 }
 
 #if compiler(>=6)
-    extension VaneClientConfig: Sendable {}
+extension VaneClientConfig: Sendable {}
 #endif
 
+
 extension VaneClientConfig: Equatable, Hashable {
-    public static func == (lhs: VaneClientConfig, rhs: VaneClientConfig) -> Bool {
+    public static func ==(lhs: VaneClientConfig, rhs: VaneClientConfig) -> Bool {
         if lhs.baseUrl != rhs.baseUrl {
             return false
         }
         if lhs.defaultHeaders != rhs.defaultHeaders {
+            return false
+        }
+        if lhs.dnsOverrides != rhs.dnsOverrides {
+            return false
+        }
+        if lhs.certificatePins != rhs.certificatePins {
+            return false
+        }
+        if lhs.cookiesEnabled != rhs.cookiesEnabled {
+            return false
+        }
+        if lhs.connectionPoolEnabled != rhs.connectionPoolEnabled {
+            return false
+        }
+        if lhs.maxIdleConnections != rhs.maxIdleConnections {
+            return false
+        }
+        if lhs.connectionIdleTimeoutSeconds != rhs.connectionIdleTimeoutSeconds {
+            return false
+        }
+        if lhs.retryMaxAttempts != rhs.retryMaxAttempts {
+            return false
+        }
+        if lhs.retryInitialDelayMillis != rhs.retryInitialDelayMillis {
+            return false
+        }
+        if lhs.retryMaxDelayMillis != rhs.retryMaxDelayMillis {
+            return false
+        }
+        if lhs.retryUnsafeMethods != rhs.retryUnsafeMethods {
+            return false
+        }
+        if lhs.maxRequestBodyBytes != rhs.maxRequestBodyBytes {
+            return false
+        }
+        if lhs.maxResponseBodyBytes != rhs.maxResponseBodyBytes {
             return false
         }
         if lhs.timeoutSeconds != rhs.timeoutSeconds {
@@ -735,57 +795,113 @@ extension VaneClientConfig: Equatable, Hashable {
         if lhs.userAgent != rhs.userAgent {
             return false
         }
+        if lhs.protocolMode != rhs.protocolMode {
+            return false
+        }
+        if lhs.proxyUrl != rhs.proxyUrl {
+            return false
+        }
+        if lhs.proxyAuthorization != rhs.proxyAuthorization {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(baseUrl)
         hasher.combine(defaultHeaders)
+        hasher.combine(dnsOverrides)
+        hasher.combine(certificatePins)
+        hasher.combine(cookiesEnabled)
+        hasher.combine(connectionPoolEnabled)
+        hasher.combine(maxIdleConnections)
+        hasher.combine(connectionIdleTimeoutSeconds)
+        hasher.combine(retryMaxAttempts)
+        hasher.combine(retryInitialDelayMillis)
+        hasher.combine(retryMaxDelayMillis)
+        hasher.combine(retryUnsafeMethods)
+        hasher.combine(maxRequestBodyBytes)
+        hasher.combine(maxResponseBodyBytes)
         hasher.combine(timeoutSeconds)
         hasher.combine(followRedirects)
         hasher.combine(userAgent)
+        hasher.combine(protocolMode)
+        hasher.combine(proxyUrl)
+        hasher.combine(proxyAuthorization)
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaneClientConfig: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws
-        -> VaneClientConfig
-    {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneClientConfig {
         return
             try VaneClientConfig(
-                baseUrl: FfiConverterOptionString.read(from: &buf),
-                defaultHeaders: FfiConverterDictionaryStringString.read(from: &buf),
-                timeoutSeconds: FfiConverterOptionUInt64.read(from: &buf),
-                followRedirects: FfiConverterBool.read(from: &buf),
-                userAgent: FfiConverterOptionString.read(from: &buf)
-            )
+                baseUrl: FfiConverterOptionString.read(from: &buf), 
+                defaultHeaders: FfiConverterDictionaryStringString.read(from: &buf), 
+                dnsOverrides: FfiConverterDictionaryStringString.read(from: &buf), 
+                certificatePins: FfiConverterDictionaryStringSequenceString.read(from: &buf), 
+                cookiesEnabled: FfiConverterBool.read(from: &buf), 
+                connectionPoolEnabled: FfiConverterBool.read(from: &buf), 
+                maxIdleConnections: FfiConverterUInt64.read(from: &buf), 
+                connectionIdleTimeoutSeconds: FfiConverterUInt64.read(from: &buf), 
+                retryMaxAttempts: FfiConverterUInt64.read(from: &buf), 
+                retryInitialDelayMillis: FfiConverterUInt64.read(from: &buf), 
+                retryMaxDelayMillis: FfiConverterUInt64.read(from: &buf), 
+                retryUnsafeMethods: FfiConverterBool.read(from: &buf), 
+                maxRequestBodyBytes: FfiConverterUInt64.read(from: &buf), 
+                maxResponseBodyBytes: FfiConverterUInt64.read(from: &buf), 
+                timeoutSeconds: FfiConverterOptionUInt64.read(from: &buf), 
+                followRedirects: FfiConverterBool.read(from: &buf), 
+                userAgent: FfiConverterOptionString.read(from: &buf), 
+                protocolMode: FfiConverterTypeVaneProtocolMode.read(from: &buf), 
+                proxyUrl: FfiConverterOptionString.read(from: &buf), 
+                proxyAuthorization: FfiConverterOptionString.read(from: &buf)
+        )
     }
 
     public static func write(_ value: VaneClientConfig, into buf: inout [UInt8]) {
         FfiConverterOptionString.write(value.baseUrl, into: &buf)
         FfiConverterDictionaryStringString.write(value.defaultHeaders, into: &buf)
+        FfiConverterDictionaryStringString.write(value.dnsOverrides, into: &buf)
+        FfiConverterDictionaryStringSequenceString.write(value.certificatePins, into: &buf)
+        FfiConverterBool.write(value.cookiesEnabled, into: &buf)
+        FfiConverterBool.write(value.connectionPoolEnabled, into: &buf)
+        FfiConverterUInt64.write(value.maxIdleConnections, into: &buf)
+        FfiConverterUInt64.write(value.connectionIdleTimeoutSeconds, into: &buf)
+        FfiConverterUInt64.write(value.retryMaxAttempts, into: &buf)
+        FfiConverterUInt64.write(value.retryInitialDelayMillis, into: &buf)
+        FfiConverterUInt64.write(value.retryMaxDelayMillis, into: &buf)
+        FfiConverterBool.write(value.retryUnsafeMethods, into: &buf)
+        FfiConverterUInt64.write(value.maxRequestBodyBytes, into: &buf)
+        FfiConverterUInt64.write(value.maxResponseBodyBytes, into: &buf)
         FfiConverterOptionUInt64.write(value.timeoutSeconds, into: &buf)
         FfiConverterBool.write(value.followRedirects, into: &buf)
         FfiConverterOptionString.write(value.userAgent, into: &buf)
+        FfiConverterTypeVaneProtocolMode.write(value.protocolMode, into: &buf)
+        FfiConverterOptionString.write(value.proxyUrl, into: &buf)
+        FfiConverterOptionString.write(value.proxyAuthorization, into: &buf)
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneClientConfig_lift(_ buf: RustBuffer) throws -> VaneClientConfig {
     return try FfiConverterTypeVaneClientConfig.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneClientConfig_lower(_ value: VaneClientConfig) -> RustBuffer {
     return FfiConverterTypeVaneClientConfig.lower(value)
 }
+
 
 public struct VaneRequest {
     public var url: String
@@ -798,10 +914,7 @@ public struct VaneRequest {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(
-        url: String, method: String, headers: [String: String], queryParams: [String: String],
-        body: Data?, timeoutSeconds: UInt64?, followRedirects: Bool
-    ) {
+    public init(url: String, method: String, headers: [String: String], queryParams: [String: String], body: Data?, timeoutSeconds: UInt64?, followRedirects: Bool) {
         self.url = url
         self.method = method
         self.headers = headers
@@ -813,11 +926,12 @@ public struct VaneRequest {
 }
 
 #if compiler(>=6)
-    extension VaneRequest: Sendable {}
+extension VaneRequest: Sendable {}
 #endif
 
+
 extension VaneRequest: Equatable, Hashable {
-    public static func == (lhs: VaneRequest, rhs: VaneRequest) -> Bool {
+    public static func ==(lhs: VaneRequest, rhs: VaneRequest) -> Bool {
         if lhs.url != rhs.url {
             return false
         }
@@ -853,22 +967,23 @@ extension VaneRequest: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaneRequest: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneRequest
-    {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneRequest {
         return
             try VaneRequest(
-                url: FfiConverterString.read(from: &buf),
-                method: FfiConverterString.read(from: &buf),
-                headers: FfiConverterDictionaryStringString.read(from: &buf),
-                queryParams: FfiConverterDictionaryStringString.read(from: &buf),
-                body: FfiConverterOptionData.read(from: &buf),
-                timeoutSeconds: FfiConverterOptionUInt64.read(from: &buf),
+                url: FfiConverterString.read(from: &buf), 
+                method: FfiConverterString.read(from: &buf), 
+                headers: FfiConverterDictionaryStringString.read(from: &buf), 
+                queryParams: FfiConverterDictionaryStringString.read(from: &buf), 
+                body: FfiConverterOptionData.read(from: &buf), 
+                timeoutSeconds: FfiConverterOptionUInt64.read(from: &buf), 
                 followRedirects: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: VaneRequest, into buf: inout [UInt8]) {
@@ -882,19 +997,21 @@ public struct FfiConverterTypeVaneRequest: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneRequest_lift(_ buf: RustBuffer) throws -> VaneRequest {
     return try FfiConverterTypeVaneRequest.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneRequest_lower(_ value: VaneRequest) -> RustBuffer {
     return FfiConverterTypeVaneRequest.lower(value)
 }
+
 
 public struct VaneResponse {
     public var statusCode: UInt16
@@ -905,9 +1022,7 @@ public struct VaneResponse {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(
-        statusCode: UInt16, headers: [String: String], body: Data, isSuccess: Bool, url: String
-    ) {
+    public init(statusCode: UInt16, headers: [String: String], body: Data, isSuccess: Bool, url: String) {
         self.statusCode = statusCode
         self.headers = headers
         self.body = body
@@ -917,11 +1032,12 @@ public struct VaneResponse {
 }
 
 #if compiler(>=6)
-    extension VaneResponse: Sendable {}
+extension VaneResponse: Sendable {}
 #endif
 
+
 extension VaneResponse: Equatable, Hashable {
-    public static func == (lhs: VaneResponse, rhs: VaneResponse) -> Bool {
+    public static func ==(lhs: VaneResponse, rhs: VaneResponse) -> Bool {
         if lhs.statusCode != rhs.statusCode {
             return false
         }
@@ -949,20 +1065,21 @@ extension VaneResponse: Equatable, Hashable {
     }
 }
 
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaneResponse: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneResponse
-    {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneResponse {
         return
             try VaneResponse(
-                statusCode: FfiConverterUInt16.read(from: &buf),
-                headers: FfiConverterDictionaryStringString.read(from: &buf),
-                body: FfiConverterData.read(from: &buf),
-                isSuccess: FfiConverterBool.read(from: &buf),
+                statusCode: FfiConverterUInt16.read(from: &buf), 
+                headers: FfiConverterDictionaryStringString.read(from: &buf), 
+                body: FfiConverterData.read(from: &buf), 
+                isSuccess: FfiConverterBool.read(from: &buf), 
                 url: FfiConverterString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: VaneResponse, into buf: inout [UInt8]) {
@@ -974,29 +1091,33 @@ public struct FfiConverterTypeVaneResponse: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneResponse_lift(_ buf: RustBuffer) throws -> VaneResponse {
     return try FfiConverterTypeVaneResponse.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneResponse_lower(_ value: VaneResponse) -> RustBuffer {
     return FfiConverterTypeVaneResponse.lower(value)
 }
 
+
 public enum VaneError: Swift.Error {
 
-    case Generic(
-        String
+    
+    
+    case Generic(String
     )
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaneError: FfiConverterRustBuffer {
     typealias SwiftType = VaneError
@@ -1005,41 +1126,52 @@ public struct FfiConverterTypeVaneError: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
-        case 1:
-            return .Generic(
-                try FfiConverterString.read(from: &buf)
+        
+
+        
+        case 1: return .Generic(
+            try FfiConverterString.read(from: &buf)
             )
 
-        default: throw UniffiInternalError.unexpectedEnumCase
+         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: VaneError, into buf: inout [UInt8]) {
         switch value {
 
-        case .Generic(let v1):
+        
+
+        
+        
+        case let .Generic(v1):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(v1, into: &buf)
-
+            
         }
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneError_lift(_ buf: RustBuffer) throws -> VaneError {
     return try FfiConverterTypeVaneError.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeVaneError_lower(_ value: VaneError) -> RustBuffer {
     return FfiConverterTypeVaneError.lower(value)
 }
 
+
 extension VaneError: Equatable, Hashable {}
+
+
+
 
 extension VaneError: Foundation.LocalizedError {
     public var errorDescription: String? {
@@ -1047,10 +1179,110 @@ extension VaneError: Foundation.LocalizedError {
     }
 }
 
-#if swift(>=5.8)
-    @_documentation(visibility: private)
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum VaneProtocolMode {
+    
+    /**
+     * Try HTTP/3 first, then fall back to HTTP/2 or HTTP/1.1 over TCP/TLS.
+     */
+    case http3ThenHttp2ThenHttp1
+    case http3Only
+    /**
+     * Use hyper over TCP/TLS with ALPN for HTTP/2 or HTTP/1.1.
+     */
+    case http2ThenHttp1
+    case http2Only
+    case http1Only
+}
+
+
+#if compiler(>=6)
+extension VaneProtocolMode: Sendable {}
 #endif
-private struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneProtocolMode: FfiConverterRustBuffer {
+    typealias SwiftType = VaneProtocolMode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneProtocolMode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .http3ThenHttp2ThenHttp1
+        
+        case 2: return .http3Only
+        
+        case 3: return .http2ThenHttp1
+        
+        case 4: return .http2Only
+        
+        case 5: return .http1Only
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VaneProtocolMode, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .http3ThenHttp2ThenHttp1:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .http3Only:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .http2ThenHttp1:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .http2Only:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .http1Only:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneProtocolMode_lift(_ buf: RustBuffer) throws -> VaneProtocolMode {
+    return try FfiConverterTypeVaneProtocolMode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneProtocolMode_lower(_ value: VaneProtocolMode) -> RustBuffer {
+    return FfiConverterTypeVaneProtocolMode.lower(value)
+}
+
+
+extension VaneProtocolMode: Equatable, Hashable {}
+
+
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
     typealias SwiftType = UInt64?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
@@ -1072,9 +1304,9 @@ private struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionString: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
@@ -1096,9 +1328,9 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionData: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
     typealias SwiftType = Data?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
@@ -1120,9 +1352,34 @@ private struct FfiConverterOptionData: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
     public static func write(_ value: [String: String], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
@@ -1132,9 +1389,7 @@ private struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String:
-        String]
-    {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: String] {
         let len: Int32 = try readInt(&buf)
         var dict = [String: String]()
         dict.reserveCapacity(Int(len))
@@ -1146,37 +1401,51 @@ private struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
         return dict
     }
 }
-public func createDefaultConfig() -> VaneClientConfig {
-    return try! FfiConverterTypeVaneClientConfig_lift(
-        try! rustCall {
-            uniffi_vane_fn_func_create_default_config(
-                $0
-            )
-        })
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringSequenceString: FfiConverterRustBuffer {
+    public static func write(_ value: [String: [String]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterSequenceString.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: [String]] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: [String]]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterSequenceString.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
 }
-public func createVaneClient(config: VaneClientConfig) throws -> VaneClient {
-    return try FfiConverterTypeVaneClient_lift(
-        try rustCallWithError(FfiConverterTypeVaneError_lift) {
-            uniffi_vane_fn_func_create_vane_client(
-                FfiConverterTypeVaneClientConfig_lower(config), $0
-            )
-        })
+public func createDefaultConfig() -> VaneClientConfig  {
+    return try!  FfiConverterTypeVaneClientConfig_lift(try! rustCall() {
+    uniffi_vane_fn_func_create_default_config($0
+    )
+})
 }
-public func parseJsonResponse(resp: VaneResponse) throws -> String {
-    return try FfiConverterString.lift(
-        try rustCallWithError(FfiConverterTypeVaneError_lift) {
-            uniffi_vane_fn_func_parse_json_response(
-                FfiConverterTypeVaneResponse_lower(resp), $0
-            )
-        })
+public func createVaneClient(config: VaneClientConfig)throws  -> VaneClient  {
+    return try  FfiConverterTypeVaneClient_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_func_create_vane_client(
+        FfiConverterTypeVaneClientConfig_lower(config),$0
+    )
+})
 }
-public func responseBodyUtf8(resp: VaneResponse) throws -> String {
-    return try FfiConverterString.lift(
-        try rustCallWithError(FfiConverterTypeVaneError_lift) {
-            uniffi_vane_fn_func_response_body_utf8(
-                FfiConverterTypeVaneResponse_lower(resp), $0
-            )
-        })
+public func responseBodyUtf8(resp: VaneResponse)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_func_response_body_utf8(
+        FfiConverterTypeVaneResponse_lower(resp),$0
+    )
+})
 }
 
 private enum InitializationResult {
@@ -1194,34 +1463,31 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if uniffi_vane_checksum_func_create_default_config() != 54371 {
+    if (uniffi_vane_checksum_func_create_default_config() != 54371) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_func_create_vane_client() != 57471 {
+    if (uniffi_vane_checksum_func_create_vane_client() != 57471) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_func_parse_json_response() != 17500 {
+    if (uniffi_vane_checksum_func_response_body_utf8() != 21709) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_func_response_body_utf8() != 21709 {
+    if (uniffi_vane_checksum_method_vaneclient_delete_request() != 44430) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_method_vaneclient_delete_request() != 44430 {
+    if (uniffi_vane_checksum_method_vaneclient_execute_request() != 51840) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_method_vaneclient_execute_request() != 51840 {
+    if (uniffi_vane_checksum_method_vaneclient_get_request() != 12326) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_method_vaneclient_get_request() != 12326 {
+    if (uniffi_vane_checksum_method_vaneclient_patch_request() != 29709) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_method_vaneclient_patch_request() != 29709 {
+    if (uniffi_vane_checksum_method_vaneclient_post_request() != 19674) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_vane_checksum_method_vaneclient_post_request() != 19674 {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if uniffi_vane_checksum_method_vaneclient_put_request() != 13810 {
+    if (uniffi_vane_checksum_method_vaneclient_put_request() != 13810) {
         return InitializationResult.apiChecksumMismatch
     }
 

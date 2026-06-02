@@ -127,39 +127,92 @@ extension VaneClient {
 // MARK: - Alamofire-style Interface
 
 @available(iOS 13.0, *)
+public typealias VaneRequestInterceptor = @Sendable (VaneRequest) async throws -> VaneRequest
+
+@available(iOS 13.0, *)
+public typealias VaneResponseInterceptor = @Sendable (VaneResponse) async throws -> VaneResponse
+
+@available(iOS 13.0, *)
+public typealias VaneErrorInterceptor = @Sendable (Error) async throws -> VaneResponse?
+
+@available(iOS 13.0, *)
 public class VaneSession {
     private let client: VaneClient
+    private let requestInterceptors: [VaneRequestInterceptor]
+    private let responseInterceptors: [VaneResponseInterceptor]
+    private let errorInterceptors: [VaneErrorInterceptor]
 
-    public init(configuration: VaneClientConfig = createDefaultConfig()) throws {
+    public init(
+        configuration: VaneClientConfig = createDefaultConfig(),
+        requestInterceptors: [VaneRequestInterceptor] = [],
+        responseInterceptors: [VaneResponseInterceptor] = [],
+        errorInterceptors: [VaneErrorInterceptor] = []
+    ) throws {
         self.client = try createVaneClient(config: configuration)
+        self.requestInterceptors = requestInterceptors
+        self.responseInterceptors = responseInterceptors
+        self.errorInterceptors = errorInterceptors
     }
 
     // MARK: - Request Building
 
     public func request(_ url: String, method: HTTPMethod = .get) -> VaneRequestBuilder {
-        return VaneRequestBuilder(client: client, url: url, method: method)
+        return VaneRequestBuilder(url: url, method: method, executor: execute)
     }
 
     // MARK: - Direct Methods
 
     public func get(_ url: String) async throws -> VaneResponse {
-        return try await client.get(url)
+        return try await request(url, method: .get).execute()
     }
 
     public func post(_ url: String, body: Data? = nil) async throws -> VaneResponse {
-        return try await client.post(url, body: body)
+        let builder = request(url, method: .post)
+        if let body { _ = builder.body(body) }
+        return try await builder.execute()
     }
 
     public func put(_ url: String, body: Data? = nil) async throws -> VaneResponse {
-        return try await client.put(url, body: body)
+        let builder = request(url, method: .put)
+        if let body { _ = builder.body(body) }
+        return try await builder.execute()
     }
 
     public func delete(_ url: String) async throws -> VaneResponse {
-        return try await client.delete(url)
+        return try await request(url, method: .delete).execute()
     }
 
     public func patch(_ url: String, body: Data? = nil) async throws -> VaneResponse {
-        return try await client.patch(url, body: body)
+        let builder = request(url, method: .patch)
+        if let body { _ = builder.body(body) }
+        return try await builder.execute()
+    }
+
+    public func execute(_ request: VaneRequest) async throws -> VaneResponse {
+        var interceptedRequest = request
+        for interceptor in requestInterceptors {
+            interceptedRequest = try await interceptor(interceptedRequest)
+        }
+
+        do {
+            var response = try await client.execute(interceptedRequest)
+            for interceptor in responseInterceptors {
+                response = try await interceptor(response)
+            }
+            return response
+        } catch {
+            for interceptor in errorInterceptors {
+                if let response = try await interceptor(error) {
+                    var interceptedResponse = response
+                    for responseInterceptor in responseInterceptors {
+                        interceptedResponse = try await responseInterceptor(interceptedResponse)
+                    }
+                    return interceptedResponse
+                }
+            }
+
+            throw error
+        }
     }
 }
 
@@ -179,11 +232,15 @@ public enum HTTPMethod: String, CaseIterable {
 
 @available(iOS 13.0, *)
 public class VaneRequestBuilder {
-    private let client: VaneClient
+    private let executor: (VaneRequest) async throws -> VaneResponse
     private var request: VaneRequest
 
-    internal init(client: VaneClient, url: String, method: HTTPMethod) {
-        self.client = client
+    internal init(
+        url: String,
+        method: HTTPMethod,
+        executor: @escaping (VaneRequest) async throws -> VaneResponse
+    ) {
+        self.executor = executor
         self.request = VaneRequest(
             url: url,
             method: method.rawValue,
@@ -241,7 +298,7 @@ public class VaneRequestBuilder {
     // MARK: - Execution
 
     public func execute() async throws -> VaneResponse {
-        return try await client.execute(request)
+        return try await executor(request)
     }
 
     public func responseJSON<T: Codable>(_ type: T.Type) async throws -> T {
@@ -283,6 +340,75 @@ public class VaneConfigurationBuilder {
         return self
     }
 
+    public func dnsOverrides(_ overrides: [String: String]) -> VaneConfigurationBuilder {
+        config.dnsOverrides = overrides
+        return self
+    }
+
+    public func dnsOverride(host: String, ipAddress: String) -> VaneConfigurationBuilder {
+        config.dnsOverrides[host] = ipAddress
+        return self
+    }
+
+    public func proxy(_ url: String, authorization: String? = nil) -> VaneConfigurationBuilder {
+        config.proxyUrl = url
+        config.proxyAuthorization = authorization
+        return self
+    }
+
+    public func proxyAuthorization(_ authorization: String?) -> VaneConfigurationBuilder {
+        config.proxyAuthorization = authorization
+        return self
+    }
+
+    public func certificatePins(_ pins: [String: [String]]) -> VaneConfigurationBuilder {
+        config.certificatePins = pins
+        return self
+    }
+
+    public func certificatePin(host: String, pins: [String]) -> VaneConfigurationBuilder {
+        config.certificatePins[host] = pins
+        return self
+    }
+
+    public func cookiesEnabled(_ enabled: Bool = true) -> VaneConfigurationBuilder {
+        config.cookiesEnabled = enabled
+        return self
+    }
+
+    public func connectionPooling(
+        enabled: Bool = true,
+        maxIdleConnections: UInt64 = 4,
+        idleTimeoutSeconds: UInt64 = 30
+    ) -> VaneConfigurationBuilder {
+        config.connectionPoolEnabled = enabled
+        config.maxIdleConnections = maxIdleConnections
+        config.connectionIdleTimeoutSeconds = idleTimeoutSeconds
+        return self
+    }
+
+    public func retry(
+        maxAttempts: UInt64,
+        initialDelayMillis: UInt64 = 100,
+        maxDelayMillis: UInt64 = 1_000,
+        retryUnsafeMethods: Bool = false
+    ) -> VaneConfigurationBuilder {
+        config.retryMaxAttempts = maxAttempts
+        config.retryInitialDelayMillis = initialDelayMillis
+        config.retryMaxDelayMillis = maxDelayMillis
+        config.retryUnsafeMethods = retryUnsafeMethods
+        return self
+    }
+
+    public func bodyLimits(
+        maxRequestBodyBytes: UInt64,
+        maxResponseBodyBytes: UInt64
+    ) -> VaneConfigurationBuilder {
+        config.maxRequestBodyBytes = maxRequestBodyBytes
+        config.maxResponseBodyBytes = maxResponseBodyBytes
+        return self
+    }
+
     public func timeout(_ seconds: UInt64) -> VaneConfigurationBuilder {
         config.timeoutSeconds = seconds
         return self
@@ -290,6 +416,36 @@ public class VaneConfigurationBuilder {
 
     public func userAgent(_ agent: String) -> VaneConfigurationBuilder {
         config.userAgent = agent
+        return self
+    }
+
+    public func protocolMode(_ mode: VaneProtocolMode) -> VaneConfigurationBuilder {
+        config.protocolMode = mode
+        return self
+    }
+
+    public func http3ThenHttp2ThenHttp1() -> VaneConfigurationBuilder {
+        config.protocolMode = .http3ThenHttp2ThenHttp1
+        return self
+    }
+
+    public func http3Only() -> VaneConfigurationBuilder {
+        config.protocolMode = .http3Only
+        return self
+    }
+
+    public func http2ThenHttp1() -> VaneConfigurationBuilder {
+        config.protocolMode = .http2ThenHttp1
+        return self
+    }
+
+    public func http2Only() -> VaneConfigurationBuilder {
+        config.protocolMode = .http2Only
+        return self
+    }
+
+    public func http1Only() -> VaneConfigurationBuilder {
+        config.protocolMode = .http1Only
         return self
     }
 
@@ -316,6 +472,14 @@ extension VaneResponse {
     }
 
     public var prettyJSON: String? {
-        return try? parseJsonResponse(resp: self)
+        guard
+            let object = try? JSONSerialization.jsonObject(with: body),
+            JSONSerialization.isValidJSONObject(object),
+            let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted]),
+            let string = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        return string
     }
 }

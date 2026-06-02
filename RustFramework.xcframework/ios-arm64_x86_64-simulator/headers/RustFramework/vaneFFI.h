@@ -302,11 +302,6 @@ RustBuffer uniffi_vane_fn_func_create_default_config(RustCallStatus *_Nonnull ou
 void*_Nonnull uniffi_vane_fn_func_create_vane_client(RustBuffer config, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_PARSE_JSON_RESPONSE
-#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_PARSE_JSON_RESPONSE
-RustBuffer uniffi_vane_fn_func_parse_json_response(RustBuffer resp, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_RESPONSE_BODY_UTF8
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_RESPONSE_BODY_UTF8
 RustBuffer uniffi_vane_fn_func_response_body_utf8(RustBuffer resp, RustCallStatus *_Nonnull out_status
@@ -601,12 +596,6 @@ uint16_t uniffi_vane_checksum_func_create_default_config(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_VANE_CLIENT
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_VANE_CLIENT
 uint16_t uniffi_vane_checksum_func_create_vane_client(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_PARSE_JSON_RESPONSE
-#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_PARSE_JSON_RESPONSE
-uint16_t uniffi_vane_checksum_func_parse_json_response(void
     
 );
 #endif
