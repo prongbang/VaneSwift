@@ -279,9 +279,28 @@ public class VaneRequestBuilder {
         return self
     }
 
+    public func textBody(
+        _ text: String,
+        encoding: String.Encoding = .utf8,
+        contentType: String = "text/plain; charset=utf-8"
+    ) throws -> VaneRequestBuilder {
+        guard let data = text.data(using: encoding) else {
+            throw VaneError.Generic("Failed to encode request text body")
+        }
+        request.body = data
+        setDefaultHeader("Content-Type", contentType)
+        return self
+    }
+
     public func jsonBody<T: Codable>(_ object: T) throws -> VaneRequestBuilder {
         request.body = try JSONEncoder().encode(object)
-        request.headers["Content-Type"] = "application/json"
+        setDefaultHeader("Content-Type", "application/json")
+        return self
+    }
+
+    public func formBody(_ fields: [String: String]) throws -> VaneRequestBuilder {
+        request.body = try formURLEncoded(fields).data(using: .utf8)
+        setDefaultHeader("Content-Type", "application/x-www-form-urlencoded")
         return self
     }
 
@@ -301,28 +320,66 @@ public class VaneRequestBuilder {
         return try await executor(request)
     }
 
-    public func responseJSON<T: Codable>(_ type: T.Type) async throws -> T {
+    public func validateStatus(_ range: ClosedRange<UInt16> = 200...299) async throws -> VaneResponse {
         let response = try await execute()
+        return try response.validateStatus(range)
+    }
 
-        guard response.isSuccess else {
-            throw VaneError.Generic("Request failed with status \(response.statusCode)")
-        }
+    public func responseBytes() async throws -> Data {
+        let response = try await validateStatus()
+        return response.body
+    }
+
+    public func responseJSON<T: Codable>(_ type: T.Type) async throws -> T {
+        let response = try await validateStatus()
 
         return try JSONDecoder().decode(type, from: response.body)
     }
 
     public func responseString() async throws -> String {
-        let response = try await execute()
-
-        guard response.isSuccess else {
-            throw VaneError.Generic("Request failed with status \(response.statusCode)")
-        }
+        let response = try await validateStatus()
 
         if let string = String(data: response.body, encoding: .utf8) {
             return string
         }
         return ""
     }
+
+    private func setDefaultHeader(_ key: String, _ value: String) {
+        let hasHeader = request.headers.keys.contains { $0.caseInsensitiveCompare(key) == .orderedSame }
+        if !hasHeader {
+            request.headers[key] = value
+        }
+    }
+}
+
+public extension VaneResponse {
+    func validateStatus(_ range: ClosedRange<UInt16> = 200...299) throws -> VaneResponse {
+        guard range.contains(statusCode) else {
+            throw VaneError.Generic("Request failed with status \(statusCode)")
+        }
+        return self
+    }
+
+    var text: String {
+        String(data: body, encoding: .utf8) ?? ""
+    }
+}
+
+private func formURLEncoded(_ fields: [String: String]) throws -> String {
+    try fields.keys.sorted().map { key in
+        guard let value = fields[key] else {
+            throw VaneError.Generic("Missing form value for \(key)")
+        }
+        return "\(formEncode(key))=\(formEncode(value))"
+    }.joined(separator: "&")
+}
+
+private func formEncode(_ value: String) -> String {
+    var allowed = CharacterSet.urlQueryAllowed
+    allowed.remove(charactersIn: ":#[]@!$&'()*+,;=")
+    return value.addingPercentEncoding(withAllowedCharacters: allowed)?
+        .replacingOccurrences(of: "%20", with: "+") ?? value
 }
 
 // MARK: - Configuration Builder

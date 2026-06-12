@@ -45,6 +45,10 @@ struct VaneSwiftTests {
         return true
     }
 
+    final class CapturedRequestBox: @unchecked Sendable {
+        var request: VaneRequest?
+    }
+
     private func runBenchmark(
         summaryName: String,
         labelPrefix: String,
@@ -206,6 +210,61 @@ struct VaneSwiftTests {
             Issue.record("Expected request interceptor to throw")
         } catch TestInterceptorError.blocked {
             return
+        }
+    }
+
+    @Test
+    func requestBodyHelpersBuildTextAndFormRequests() async throws {
+        let captured = CapturedRequestBox()
+        let session = try VaneSession(
+            configuration: VaneConfigurationBuilder().http3Only().build(),
+            requestInterceptors: [
+                { request in
+                    captured.request = request
+                    return request
+                }
+            ],
+            errorInterceptors: [
+                { _ in
+                    VaneResponse(
+                        statusCode: 204,
+                        headers: [:],
+                        body: Data(),
+                        isSuccess: true,
+                        url: "interceptor://synthetic"
+                    )
+                }
+            ]
+        )
+
+        _ = try await session.request("http://example.com/post", method: .post)
+            .textBody("hello")
+            .execute()
+
+        #expect(captured.request?.headers["Content-Type"] == "text/plain; charset=utf-8")
+        #expect(captured.request?.body == Data("hello".utf8))
+
+        _ = try await session.request("http://example.com/post", method: .post)
+            .formBody(["space": "hello world", "token": "a&b"])
+            .execute()
+
+        #expect(captured.request?.headers["Content-Type"] == "application/x-www-form-urlencoded")
+        #expect(String(data: captured.request?.body ?? Data(), encoding: .utf8) == "space=hello+world&token=a%26b")
+    }
+
+    @Test
+    func responseValidationHelpersThrowOnUnexpectedStatus() throws {
+        let response = VaneResponse(
+            statusCode: 404,
+            headers: [:],
+            body: Data("missing".utf8),
+            isSuccess: false,
+            url: "https://example.com/missing"
+        )
+
+        #expect(response.text == "missing")
+        #expect(throws: VaneError.self) {
+            _ = try response.validateStatus()
         }
     }
 
