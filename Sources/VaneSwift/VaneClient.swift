@@ -1188,12 +1188,12 @@ extension VaneError: Foundation.LocalizedError {
 public enum VaneProtocolMode {
     
     /**
-     * Try HTTP/3 first, then fall back to HTTP/2 or HTTP/1.1 over TCP/TLS.
+     * Kept for source compatibility; this build uses HTTP/3 only.
      */
     case http3ThenHttp2ThenHttp1
     case http3Only
     /**
-     * Use hyper over TCP/TLS with ALPN for HTTP/2 or HTTP/1.1.
+     * Kept for source compatibility; HTTP/2 and HTTP/1.1 are unsupported.
      */
     case http2ThenHttp1
     case http2Only
