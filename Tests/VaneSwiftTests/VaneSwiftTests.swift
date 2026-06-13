@@ -49,6 +49,11 @@ struct VaneSwiftTests {
         var request: VaneRequest?
     }
 
+    final class ProgressBox: @unchecked Sendable {
+        var upload: (sent: UInt64, total: UInt64)?
+        var download: (received: UInt64, total: UInt64)?
+    }
+
     private func runBenchmark(
         summaryName: String,
         labelPrefix: String,
@@ -214,6 +219,66 @@ struct VaneSwiftTests {
     }
 
     @Test
+    func interceptorsCanBeAddedAndClearedAfterSessionCreation() async throws {
+        let captured = CapturedRequestBox()
+        let session = try VaneSession(
+            configuration: VaneConfigurationBuilder().http3Only().build(),
+            errorInterceptors: [
+                { _ in
+                    VaneResponse(
+                        statusCode: 204,
+                        headers: [:],
+                        body: Data(),
+                        isSuccess: true,
+                        url: "interceptor://synthetic"
+                    )
+                }
+            ]
+        )
+
+        session
+            .addRequestInterceptor { request in
+                var request = request
+                request.headers["x-late"] = "1"
+                captured.request = request
+                return request
+            }
+            .addResponseInterceptor { response in
+                var response = response
+                response.headers["x-response"] = "1"
+                return response
+            }
+
+        let response = try await session.get("http://example.com/late")
+
+        #expect(captured.request?.headers["x-late"] == "1")
+        #expect(response.headers["x-response"] == "1")
+
+        session.clearInterceptors()
+        captured.request = nil
+
+        do {
+            _ = try await session.get("http://example.com/clear")
+            Issue.record("Expected clearInterceptors to remove synthetic error handling")
+        } catch {
+            #expect(captured.request == nil)
+        }
+    }
+
+    @Test
+    func certificatePinsCanBeUpdatedAfterSessionCreation() throws {
+        let session = try VaneSession(configuration: VaneConfigurationBuilder().http3Only().build())
+
+        try session
+            .setCertificatePins(
+                host: "api.example.com",
+                pins: ["sha256/current", "sha256/backup"]
+            )
+            .addCertificatePin(host: "api.example.com", pin: "sha256-cert/current")
+            .clearCertificatePins(host: "api.example.com")
+    }
+
+    @Test
     func requestBodyHelpersBuildTextAndFormRequests() async throws {
         let captured = CapturedRequestBox()
         let session = try VaneSession(
@@ -250,6 +315,64 @@ struct VaneSwiftTests {
 
         #expect(captured.request?.headers["Content-Type"] == "application/x-www-form-urlencoded")
         #expect(String(data: captured.request?.body ?? Data(), encoding: .utf8) == "space=hello+world&token=a%26b")
+    }
+
+    @Test
+    func multipartAndProgressHelpersDecorateRequests() async throws {
+        let captured = CapturedRequestBox()
+        let session = try VaneSession(
+            configuration: VaneConfigurationBuilder().http3Only().build(),
+            requestInterceptors: [
+                { request in
+                    captured.request = request
+                    return request
+                }
+            ],
+            errorInterceptors: [
+                { _ in
+                    VaneResponse(
+                        statusCode: 204,
+                        headers: [:],
+                        body: Data(),
+                        isSuccess: true,
+                        url: "interceptor://synthetic"
+                    )
+                }
+            ]
+        )
+
+        let progress = ProgressBox()
+        _ = try await session.request("http://example.com/upload", method: .post)
+            .multipart(
+                fields: ["title": "avatar"],
+                files: [
+                    VaneMultipartFile(
+                        fieldName: "photo",
+                        data: Data([1, 2, 3]),
+                        fileName: "me.jpg",
+                        contentType: "image/jpeg"
+                    )
+                ]
+            )
+            .downloadToFile("/tmp/result.json")
+            .onUploadProgress { sent, total in
+                progress.upload = (sent, total)
+            }
+            .onDownloadProgress { received, total in
+                progress.download = (received, total)
+            }
+            .execute()
+
+        let contentType = captured.request?.headers["Content-Type"] ?? ""
+        let body = String(data: captured.request?.body ?? Data(), encoding: .utf8) ?? ""
+        #expect(contentType.hasPrefix("multipart/form-data; boundary="))
+        #expect(body.contains("name=\"title\""))
+        #expect(body.contains("name=\"photo\"; filename=\"me.jpg\""))
+        #expect(body.contains("Content-Type: image/jpeg"))
+        #expect(captured.request?.responseBodyPath == "/tmp/result.json")
+        #expect(captured.request?.progressId != nil)
+        #expect(progress.upload != nil)
+        #expect(progress.download != nil)
     }
 
     @Test

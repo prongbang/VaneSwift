@@ -35,6 +35,19 @@ let response = try await session.request("/users", method: .post)
 
 // MARK: - Swift Extensions and Helpers
 
+public extension VaneResponse {
+    init(statusCode: UInt16, headers: [String: String], body: Data, isSuccess: Bool, url: String) {
+        self.init(
+            statusCode: statusCode,
+            headers: headers,
+            body: body,
+            bodyFilePath: nil,
+            isSuccess: isSuccess,
+            url: url
+        )
+    }
+}
+
 extension VaneClient {
 
     // MARK: - Async/Await Support
@@ -136,11 +149,33 @@ public typealias VaneResponseInterceptor = @Sendable (VaneResponse) async throws
 public typealias VaneErrorInterceptor = @Sendable (Error) async throws -> VaneResponse?
 
 @available(iOS 13.0, *)
+public typealias VaneProgressCallback = @Sendable (_ transferred: UInt64, _ total: UInt64) -> Void
+
+public struct VaneMultipartFile: Sendable {
+    public let fieldName: String
+    public let data: Data
+    public let fileName: String
+    public let contentType: String
+
+    public init(
+        fieldName: String,
+        data: Data,
+        fileName: String? = nil,
+        contentType: String = "application/octet-stream"
+    ) {
+        self.fieldName = fieldName
+        self.data = data
+        self.fileName = fileName ?? fieldName
+        self.contentType = contentType
+    }
+}
+
+@available(iOS 13.0, *)
 public class VaneSession {
     private let client: VaneClient
-    private let requestInterceptors: [VaneRequestInterceptor]
-    private let responseInterceptors: [VaneResponseInterceptor]
-    private let errorInterceptors: [VaneErrorInterceptor]
+    private var requestInterceptors: [VaneRequestInterceptor]
+    private var responseInterceptors: [VaneResponseInterceptor]
+    private var errorInterceptors: [VaneErrorInterceptor]
 
     public init(
         configuration: VaneClientConfig = createDefaultConfig(),
@@ -158,6 +193,50 @@ public class VaneSession {
 
     public func request(_ url: String, method: HTTPMethod = .get) -> VaneRequestBuilder {
         return VaneRequestBuilder(url: url, method: method, executor: execute)
+    }
+
+    @discardableResult
+    public func addRequestInterceptor(_ interceptor: @escaping VaneRequestInterceptor) -> VaneSession {
+        requestInterceptors.append(interceptor)
+        return self
+    }
+
+    @discardableResult
+    public func addResponseInterceptor(_ interceptor: @escaping VaneResponseInterceptor) -> VaneSession {
+        responseInterceptors.append(interceptor)
+        return self
+    }
+
+    @discardableResult
+    public func addErrorInterceptor(_ interceptor: @escaping VaneErrorInterceptor) -> VaneSession {
+        errorInterceptors.append(interceptor)
+        return self
+    }
+
+    @discardableResult
+    public func clearInterceptors() -> VaneSession {
+        requestInterceptors.removeAll()
+        responseInterceptors.removeAll()
+        errorInterceptors.removeAll()
+        return self
+    }
+
+    @discardableResult
+    public func setCertificatePins(host: String, pins: [String]) throws -> VaneSession {
+        try client.setCertificatePins(host: host, pins: pins)
+        return self
+    }
+
+    @discardableResult
+    public func addCertificatePin(host: String, pin: String) throws -> VaneSession {
+        try client.addCertificatePin(host: host, pin: pin)
+        return self
+    }
+
+    @discardableResult
+    public func clearCertificatePins(host: String) throws -> VaneSession {
+        try client.clearCertificatePins(host: host)
+        return self
     }
 
     // MARK: - Direct Methods
@@ -188,22 +267,69 @@ public class VaneSession {
         return try await builder.execute()
     }
 
+    public func postJSON<T: Codable>(_ url: String, _ object: T) async throws -> VaneResponse {
+        return try await request(url, method: .post)
+            .jsonBody(object)
+            .execute()
+    }
+
+    public func postForm(_ url: String, fields: [String: String]) async throws -> VaneResponse {
+        return try await request(url, method: .post)
+            .formBody(fields)
+            .execute()
+    }
+
+    public func uploadFile(
+        _ url: String,
+        path: String,
+        method: HTTPMethod = .post,
+        onUploadProgress: VaneProgressCallback? = nil,
+        onDownloadProgress: VaneProgressCallback? = nil
+    ) async throws -> VaneResponse {
+        let builder = request(url, method: method)
+            .bodyFile(path)
+        if let onUploadProgress {
+            _ = builder.onUploadProgress(onUploadProgress)
+        }
+        if let onDownloadProgress {
+            _ = builder.onDownloadProgress(onDownloadProgress)
+        }
+        return try await builder.execute()
+    }
+
+    public func download(
+        _ url: String,
+        to path: String,
+        onDownloadProgress: VaneProgressCallback? = nil
+    ) async throws -> VaneResponse {
+        let builder = request(url, method: .get)
+            .downloadToFile(path)
+        if let onDownloadProgress {
+            _ = builder.onDownloadProgress(onDownloadProgress)
+        }
+        return try await builder.execute()
+    }
+
     public func execute(_ request: VaneRequest) async throws -> VaneResponse {
         var interceptedRequest = request
+        let requestInterceptors = requestInterceptors
         for interceptor in requestInterceptors {
             interceptedRequest = try await interceptor(interceptedRequest)
         }
 
         do {
             var response = try await client.execute(interceptedRequest)
+            let responseInterceptors = responseInterceptors
             for interceptor in responseInterceptors {
                 response = try await interceptor(response)
             }
             return response
         } catch {
+            let errorInterceptors = errorInterceptors
             for interceptor in errorInterceptors {
                 if let response = try await interceptor(error) {
                     var interceptedResponse = response
+                    let responseInterceptors = responseInterceptors
                     for responseInterceptor in responseInterceptors {
                         interceptedResponse = try await responseInterceptor(interceptedResponse)
                     }
@@ -234,6 +360,8 @@ public enum HTTPMethod: String, CaseIterable {
 public class VaneRequestBuilder {
     private let executor: (VaneRequest) async throws -> VaneResponse
     private var request: VaneRequest
+    private var uploadProgress: VaneProgressCallback?
+    private var downloadProgress: VaneProgressCallback?
 
     internal init(
         url: String,
@@ -247,6 +375,10 @@ public class VaneRequestBuilder {
             headers: [:],
             queryParams: [:],
             body: nil,
+            bodyFilePath: nil,
+            responseBodyPath: nil,
+            cancelTokenId: nil,
+            progressId: nil,
             timeoutSeconds: nil,
             followRedirects: true
         )
@@ -276,7 +408,60 @@ public class VaneRequestBuilder {
 
     public func body(_ body: Data) -> VaneRequestBuilder {
         request.body = body
+        request.bodyFilePath = nil
         return self
+    }
+
+    public func bodyFile(_ path: String) -> VaneRequestBuilder {
+        request.bodyFilePath = path
+        request.body = nil
+        return self
+    }
+
+    public func downloadToFile(_ path: String) -> VaneRequestBuilder {
+        request.responseBodyPath = path
+        return self
+    }
+
+    public func onUploadProgress(_ callback: @escaping VaneProgressCallback) -> VaneRequestBuilder {
+        uploadProgress = callback
+        return self
+    }
+
+    public func onDownloadProgress(_ callback: @escaping VaneProgressCallback) -> VaneRequestBuilder {
+        downloadProgress = callback
+        return self
+    }
+
+    public func multipart(
+        fields: [String: String] = [:],
+        files: [VaneMultipartFile] = []
+    ) -> VaneRequestBuilder {
+        let boundary = "vane-\(UInt64(Date().timeIntervalSince1970 * 1_000_000))"
+        var body = Data()
+
+        for key in fields.keys.sorted() {
+            guard let value = fields[key] else { continue }
+            body.appendMultipartString("--\(boundary)\r\n")
+            body.appendMultipartString("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+            body.appendMultipartString(value)
+            body.appendMultipartString("\r\n")
+        }
+
+        for file in files {
+            body.appendMultipartString("--\(boundary)\r\n")
+            body.appendMultipartString(
+                "Content-Disposition: form-data; name=\"\(file.fieldName)\"; filename=\"\(file.fileName)\"\r\n"
+            )
+            body.appendMultipartString("Content-Type: \(file.contentType)\r\n\r\n")
+            body.append(file.data)
+            body.appendMultipartString("\r\n")
+        }
+
+        body.appendMultipartString("--\(boundary)--\r\n")
+        return self
+            .body(body)
+            .setDefaultHeaderReturning("Content-Type", "multipart/form-data; boundary=\(boundary)")
     }
 
     public func textBody(
@@ -287,19 +472,21 @@ public class VaneRequestBuilder {
         guard let data = text.data(using: encoding) else {
             throw VaneError.Generic("Failed to encode request text body")
         }
-        request.body = data
+        _ = body(data)
         setDefaultHeader("Content-Type", contentType)
         return self
     }
 
     public func jsonBody<T: Codable>(_ object: T) throws -> VaneRequestBuilder {
-        request.body = try JSONEncoder().encode(object)
+        _ = body(try JSONEncoder().encode(object))
         setDefaultHeader("Content-Type", "application/json")
         return self
     }
 
     public func formBody(_ fields: [String: String]) throws -> VaneRequestBuilder {
-        request.body = try formURLEncoded(fields).data(using: .utf8)
+        if let data = try formURLEncoded(fields).data(using: .utf8) {
+            _ = body(data)
+        }
         setDefaultHeader("Content-Type", "application/x-www-form-urlencoded")
         return self
     }
@@ -317,7 +504,38 @@ public class VaneRequestBuilder {
     // MARK: - Execution
 
     public func execute() async throws -> VaneResponse {
-        return try await executor(request)
+        var executableRequest = request
+        let progressId: UInt64?
+        let progressTask: Task<Void, Never>?
+
+        if uploadProgress != nil || downloadProgress != nil {
+            let id = createProgress()
+            executableRequest.progressId = id
+            progressId = id
+            progressTask = Task { [uploadProgress, downloadProgress] in
+                while !Task.isCancelled {
+                    let progress = progressSnapshotById(id: id)
+                    uploadProgress?(progress.uploadSent, progress.uploadTotal)
+                    downloadProgress?(progress.downloadReceived, progress.downloadTotal)
+                    if progress.done {
+                        break
+                    }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+        } else {
+            progressId = nil
+            progressTask = nil
+        }
+
+        do {
+            let response = try await executor(executableRequest)
+            finishProgress(progressId, progressTask)
+            return response
+        } catch {
+            finishProgress(progressId, progressTask)
+            throw error
+        }
     }
 
     public func validateStatus(_ range: ClosedRange<UInt16> = 200...299) async throws -> VaneResponse {
@@ -350,6 +568,26 @@ public class VaneRequestBuilder {
         if !hasHeader {
             request.headers[key] = value
         }
+    }
+
+    private func setDefaultHeaderReturning(_ key: String, _ value: String) -> VaneRequestBuilder {
+        setDefaultHeader(key, value)
+        return self
+    }
+
+    private func finishProgress(_ progressId: UInt64?, _ task: Task<Void, Never>?) {
+        guard let progressId else { return }
+        task?.cancel()
+        let progress = progressSnapshotById(id: progressId)
+        uploadProgress?(progress.uploadSent, progress.uploadTotal)
+        downloadProgress?(progress.downloadReceived, progress.downloadTotal)
+        freeProgress(id: progressId)
+    }
+}
+
+private extension Data {
+    mutating func appendMultipartString(_ value: String) {
+        append(Data(value.utf8))
     }
 }
 
@@ -430,6 +668,11 @@ public class VaneConfigurationBuilder {
 
     public func cookiesEnabled(_ enabled: Bool = true) -> VaneConfigurationBuilder {
         config.cookiesEnabled = enabled
+        return self
+    }
+
+    public func cookiePersistencePath(_ path: String?) -> VaneConfigurationBuilder {
+        config.cookiePersistencePath = path
         return self
     }
 

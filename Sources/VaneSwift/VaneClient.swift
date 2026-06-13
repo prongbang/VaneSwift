@@ -517,6 +517,10 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 public protocol VaneClientProtocol: AnyObject, Sendable {
     
+    func addCertificatePin(host: String, pin: String) throws 
+    
+    func clearCertificatePins(host: String) throws 
+    
     func deleteRequest(url: String) throws  -> VaneResponse
     
     func executeRequest(request: VaneRequest) throws  -> VaneResponse
@@ -528,6 +532,8 @@ public protocol VaneClientProtocol: AnyObject, Sendable {
     func postRequest(url: String, body: Data?) throws  -> VaneResponse
     
     func putRequest(url: String, body: Data?) throws  -> VaneResponse
+    
+    func setCertificatePins(host: String, pins: [String]) throws 
     
 }
 open class VaneClient: VaneClientProtocol, @unchecked Sendable {
@@ -582,6 +588,21 @@ open class VaneClient: VaneClientProtocol, @unchecked Sendable {
     
 
     
+open func addCertificatePin(host: String, pin: String)throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_add_certificate_pin(self.uniffiClonePointer(),
+        FfiConverterString.lower(host),
+        FfiConverterString.lower(pin),$0
+    )
+}
+}
+    
+open func clearCertificatePins(host: String)throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_clear_certificate_pins(self.uniffiClonePointer(),
+        FfiConverterString.lower(host),$0
+    )
+}
+}
+    
 open func deleteRequest(url: String)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
     uniffi_vane_fn_method_vaneclient_delete_request(self.uniffiClonePointer(),
@@ -631,6 +652,14 @@ open func putRequest(url: String, body: Data?)throws  -> VaneResponse  {
         FfiConverterOptionData.lower(body),$0
     )
 })
+}
+    
+open func setCertificatePins(host: String, pins: [String])throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_set_certificate_pins(self.uniffiClonePointer(),
+        FfiConverterString.lower(host),
+        FfiConverterSequenceString.lower(pins),$0
+    )
+}
 }
     
 
@@ -695,6 +724,7 @@ public struct VaneClientConfig {
     public var dnsOverrides: [String: String]
     public var certificatePins: [String: [String]]
     public var cookiesEnabled: Bool
+    public var cookiePersistencePath: String?
     public var connectionPoolEnabled: Bool
     public var maxIdleConnections: UInt64
     public var connectionIdleTimeoutSeconds: UInt64
@@ -713,12 +743,13 @@ public struct VaneClientConfig {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(baseUrl: String?, defaultHeaders: [String: String], dnsOverrides: [String: String], certificatePins: [String: [String]], cookiesEnabled: Bool, connectionPoolEnabled: Bool, maxIdleConnections: UInt64, connectionIdleTimeoutSeconds: UInt64, retryMaxAttempts: UInt64, retryInitialDelayMillis: UInt64, retryMaxDelayMillis: UInt64, retryUnsafeMethods: Bool, maxRequestBodyBytes: UInt64, maxResponseBodyBytes: UInt64, timeoutSeconds: UInt64?, followRedirects: Bool, userAgent: String?, protocolMode: VaneProtocolMode, proxyUrl: String?, proxyAuthorization: String?) {
+    public init(baseUrl: String?, defaultHeaders: [String: String], dnsOverrides: [String: String], certificatePins: [String: [String]], cookiesEnabled: Bool, cookiePersistencePath: String?, connectionPoolEnabled: Bool, maxIdleConnections: UInt64, connectionIdleTimeoutSeconds: UInt64, retryMaxAttempts: UInt64, retryInitialDelayMillis: UInt64, retryMaxDelayMillis: UInt64, retryUnsafeMethods: Bool, maxRequestBodyBytes: UInt64, maxResponseBodyBytes: UInt64, timeoutSeconds: UInt64?, followRedirects: Bool, userAgent: String?, protocolMode: VaneProtocolMode, proxyUrl: String?, proxyAuthorization: String?) {
         self.baseUrl = baseUrl
         self.defaultHeaders = defaultHeaders
         self.dnsOverrides = dnsOverrides
         self.certificatePins = certificatePins
         self.cookiesEnabled = cookiesEnabled
+        self.cookiePersistencePath = cookiePersistencePath
         self.connectionPoolEnabled = connectionPoolEnabled
         self.maxIdleConnections = maxIdleConnections
         self.connectionIdleTimeoutSeconds = connectionIdleTimeoutSeconds
@@ -757,6 +788,9 @@ extension VaneClientConfig: Equatable, Hashable {
             return false
         }
         if lhs.cookiesEnabled != rhs.cookiesEnabled {
+            return false
+        }
+        if lhs.cookiePersistencePath != rhs.cookiePersistencePath {
             return false
         }
         if lhs.connectionPoolEnabled != rhs.connectionPoolEnabled {
@@ -813,6 +847,7 @@ extension VaneClientConfig: Equatable, Hashable {
         hasher.combine(dnsOverrides)
         hasher.combine(certificatePins)
         hasher.combine(cookiesEnabled)
+        hasher.combine(cookiePersistencePath)
         hasher.combine(connectionPoolEnabled)
         hasher.combine(maxIdleConnections)
         hasher.combine(connectionIdleTimeoutSeconds)
@@ -845,6 +880,7 @@ public struct FfiConverterTypeVaneClientConfig: FfiConverterRustBuffer {
                 dnsOverrides: FfiConverterDictionaryStringString.read(from: &buf), 
                 certificatePins: FfiConverterDictionaryStringSequenceString.read(from: &buf), 
                 cookiesEnabled: FfiConverterBool.read(from: &buf), 
+                cookiePersistencePath: FfiConverterOptionString.read(from: &buf), 
                 connectionPoolEnabled: FfiConverterBool.read(from: &buf), 
                 maxIdleConnections: FfiConverterUInt64.read(from: &buf), 
                 connectionIdleTimeoutSeconds: FfiConverterUInt64.read(from: &buf), 
@@ -869,6 +905,7 @@ public struct FfiConverterTypeVaneClientConfig: FfiConverterRustBuffer {
         FfiConverterDictionaryStringString.write(value.dnsOverrides, into: &buf)
         FfiConverterDictionaryStringSequenceString.write(value.certificatePins, into: &buf)
         FfiConverterBool.write(value.cookiesEnabled, into: &buf)
+        FfiConverterOptionString.write(value.cookiePersistencePath, into: &buf)
         FfiConverterBool.write(value.connectionPoolEnabled, into: &buf)
         FfiConverterUInt64.write(value.maxIdleConnections, into: &buf)
         FfiConverterUInt64.write(value.connectionIdleTimeoutSeconds, into: &buf)
@@ -903,23 +940,125 @@ public func FfiConverterTypeVaneClientConfig_lower(_ value: VaneClientConfig) ->
 }
 
 
+public struct VaneProgressSnapshot {
+    public var uploadSent: UInt64
+    public var uploadTotal: UInt64
+    public var downloadReceived: UInt64
+    public var downloadTotal: UInt64
+    public var done: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(uploadSent: UInt64, uploadTotal: UInt64, downloadReceived: UInt64, downloadTotal: UInt64, done: Bool) {
+        self.uploadSent = uploadSent
+        self.uploadTotal = uploadTotal
+        self.downloadReceived = downloadReceived
+        self.downloadTotal = downloadTotal
+        self.done = done
+    }
+}
+
+#if compiler(>=6)
+extension VaneProgressSnapshot: Sendable {}
+#endif
+
+
+extension VaneProgressSnapshot: Equatable, Hashable {
+    public static func ==(lhs: VaneProgressSnapshot, rhs: VaneProgressSnapshot) -> Bool {
+        if lhs.uploadSent != rhs.uploadSent {
+            return false
+        }
+        if lhs.uploadTotal != rhs.uploadTotal {
+            return false
+        }
+        if lhs.downloadReceived != rhs.downloadReceived {
+            return false
+        }
+        if lhs.downloadTotal != rhs.downloadTotal {
+            return false
+        }
+        if lhs.done != rhs.done {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(uploadSent)
+        hasher.combine(uploadTotal)
+        hasher.combine(downloadReceived)
+        hasher.combine(downloadTotal)
+        hasher.combine(done)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneProgressSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneProgressSnapshot {
+        return
+            try VaneProgressSnapshot(
+                uploadSent: FfiConverterUInt64.read(from: &buf), 
+                uploadTotal: FfiConverterUInt64.read(from: &buf), 
+                downloadReceived: FfiConverterUInt64.read(from: &buf), 
+                downloadTotal: FfiConverterUInt64.read(from: &buf), 
+                done: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VaneProgressSnapshot, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.uploadSent, into: &buf)
+        FfiConverterUInt64.write(value.uploadTotal, into: &buf)
+        FfiConverterUInt64.write(value.downloadReceived, into: &buf)
+        FfiConverterUInt64.write(value.downloadTotal, into: &buf)
+        FfiConverterBool.write(value.done, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneProgressSnapshot_lift(_ buf: RustBuffer) throws -> VaneProgressSnapshot {
+    return try FfiConverterTypeVaneProgressSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneProgressSnapshot_lower(_ value: VaneProgressSnapshot) -> RustBuffer {
+    return FfiConverterTypeVaneProgressSnapshot.lower(value)
+}
+
+
 public struct VaneRequest {
     public var url: String
     public var method: String
     public var headers: [String: String]
     public var queryParams: [String: String]
     public var body: Data?
+    public var bodyFilePath: String?
+    public var responseBodyPath: String?
+    public var cancelTokenId: UInt64?
+    public var progressId: UInt64?
     public var timeoutSeconds: UInt64?
     public var followRedirects: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(url: String, method: String, headers: [String: String], queryParams: [String: String], body: Data?, timeoutSeconds: UInt64?, followRedirects: Bool) {
+    public init(url: String, method: String, headers: [String: String], queryParams: [String: String], body: Data?, bodyFilePath: String?, responseBodyPath: String?, cancelTokenId: UInt64?, progressId: UInt64?, timeoutSeconds: UInt64?, followRedirects: Bool) {
         self.url = url
         self.method = method
         self.headers = headers
         self.queryParams = queryParams
         self.body = body
+        self.bodyFilePath = bodyFilePath
+        self.responseBodyPath = responseBodyPath
+        self.cancelTokenId = cancelTokenId
+        self.progressId = progressId
         self.timeoutSeconds = timeoutSeconds
         self.followRedirects = followRedirects
     }
@@ -947,6 +1086,18 @@ extension VaneRequest: Equatable, Hashable {
         if lhs.body != rhs.body {
             return false
         }
+        if lhs.bodyFilePath != rhs.bodyFilePath {
+            return false
+        }
+        if lhs.responseBodyPath != rhs.responseBodyPath {
+            return false
+        }
+        if lhs.cancelTokenId != rhs.cancelTokenId {
+            return false
+        }
+        if lhs.progressId != rhs.progressId {
+            return false
+        }
         if lhs.timeoutSeconds != rhs.timeoutSeconds {
             return false
         }
@@ -962,6 +1113,10 @@ extension VaneRequest: Equatable, Hashable {
         hasher.combine(headers)
         hasher.combine(queryParams)
         hasher.combine(body)
+        hasher.combine(bodyFilePath)
+        hasher.combine(responseBodyPath)
+        hasher.combine(cancelTokenId)
+        hasher.combine(progressId)
         hasher.combine(timeoutSeconds)
         hasher.combine(followRedirects)
     }
@@ -981,6 +1136,10 @@ public struct FfiConverterTypeVaneRequest: FfiConverterRustBuffer {
                 headers: FfiConverterDictionaryStringString.read(from: &buf), 
                 queryParams: FfiConverterDictionaryStringString.read(from: &buf), 
                 body: FfiConverterOptionData.read(from: &buf), 
+                bodyFilePath: FfiConverterOptionString.read(from: &buf), 
+                responseBodyPath: FfiConverterOptionString.read(from: &buf), 
+                cancelTokenId: FfiConverterOptionUInt64.read(from: &buf), 
+                progressId: FfiConverterOptionUInt64.read(from: &buf), 
                 timeoutSeconds: FfiConverterOptionUInt64.read(from: &buf), 
                 followRedirects: FfiConverterBool.read(from: &buf)
         )
@@ -992,6 +1151,10 @@ public struct FfiConverterTypeVaneRequest: FfiConverterRustBuffer {
         FfiConverterDictionaryStringString.write(value.headers, into: &buf)
         FfiConverterDictionaryStringString.write(value.queryParams, into: &buf)
         FfiConverterOptionData.write(value.body, into: &buf)
+        FfiConverterOptionString.write(value.bodyFilePath, into: &buf)
+        FfiConverterOptionString.write(value.responseBodyPath, into: &buf)
+        FfiConverterOptionUInt64.write(value.cancelTokenId, into: &buf)
+        FfiConverterOptionUInt64.write(value.progressId, into: &buf)
         FfiConverterOptionUInt64.write(value.timeoutSeconds, into: &buf)
         FfiConverterBool.write(value.followRedirects, into: &buf)
     }
@@ -1017,15 +1180,17 @@ public struct VaneResponse {
     public var statusCode: UInt16
     public var headers: [String: String]
     public var body: Data
+    public var bodyFilePath: String?
     public var isSuccess: Bool
     public var url: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(statusCode: UInt16, headers: [String: String], body: Data, isSuccess: Bool, url: String) {
+    public init(statusCode: UInt16, headers: [String: String], body: Data, bodyFilePath: String?, isSuccess: Bool, url: String) {
         self.statusCode = statusCode
         self.headers = headers
         self.body = body
+        self.bodyFilePath = bodyFilePath
         self.isSuccess = isSuccess
         self.url = url
     }
@@ -1047,6 +1212,9 @@ extension VaneResponse: Equatable, Hashable {
         if lhs.body != rhs.body {
             return false
         }
+        if lhs.bodyFilePath != rhs.bodyFilePath {
+            return false
+        }
         if lhs.isSuccess != rhs.isSuccess {
             return false
         }
@@ -1060,6 +1228,7 @@ extension VaneResponse: Equatable, Hashable {
         hasher.combine(statusCode)
         hasher.combine(headers)
         hasher.combine(body)
+        hasher.combine(bodyFilePath)
         hasher.combine(isSuccess)
         hasher.combine(url)
     }
@@ -1077,6 +1246,7 @@ public struct FfiConverterTypeVaneResponse: FfiConverterRustBuffer {
                 statusCode: FfiConverterUInt16.read(from: &buf), 
                 headers: FfiConverterDictionaryStringString.read(from: &buf), 
                 body: FfiConverterData.read(from: &buf), 
+                bodyFilePath: FfiConverterOptionString.read(from: &buf), 
                 isSuccess: FfiConverterBool.read(from: &buf), 
                 url: FfiConverterString.read(from: &buf)
         )
@@ -1086,6 +1256,7 @@ public struct FfiConverterTypeVaneResponse: FfiConverterRustBuffer {
         FfiConverterUInt16.write(value.statusCode, into: &buf)
         FfiConverterDictionaryStringString.write(value.headers, into: &buf)
         FfiConverterData.write(value.body, into: &buf)
+        FfiConverterOptionString.write(value.bodyFilePath, into: &buf)
         FfiConverterBool.write(value.isSuccess, into: &buf)
         FfiConverterString.write(value.url, into: &buf)
     }
@@ -1172,14 +1343,11 @@ extension VaneError: Equatable, Hashable {}
 
 
 
-
 extension VaneError: Foundation.LocalizedError {
     public var errorDescription: String? {
         String(reflecting: self)
     }
 }
-
-
 
 
 // Note that we don't yet support `indirect` for enums.
@@ -1273,9 +1441,6 @@ public func FfiConverterTypeVaneProtocolMode_lower(_ value: VaneProtocolMode) ->
 
 
 extension VaneProtocolMode: Equatable, Hashable {}
-
-
-
 
 
 
@@ -1433,10 +1598,29 @@ public func createDefaultConfig() -> VaneClientConfig  {
     )
 })
 }
+public func createProgress() -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_vane_fn_func_create_progress($0
+    )
+})
+}
 public func createVaneClient(config: VaneClientConfig)throws  -> VaneClient  {
     return try  FfiConverterTypeVaneClient_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
     uniffi_vane_fn_func_create_vane_client(
         FfiConverterTypeVaneClientConfig_lower(config),$0
+    )
+})
+}
+public func freeProgress(id: UInt64)  {try! rustCall() {
+    uniffi_vane_fn_func_free_progress(
+        FfiConverterUInt64.lower(id),$0
+    )
+}
+}
+public func progressSnapshotById(id: UInt64) -> VaneProgressSnapshot  {
+    return try!  FfiConverterTypeVaneProgressSnapshot_lift(try! rustCall() {
+    uniffi_vane_fn_func_progress_snapshot_by_id(
+        FfiConverterUInt64.lower(id),$0
     )
 })
 }
@@ -1466,10 +1650,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_vane_checksum_func_create_default_config() != 54371) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_vane_checksum_func_create_progress() != 52627) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vane_checksum_func_create_vane_client() != 57471) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_vane_checksum_func_free_progress() != 42043) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_func_progress_snapshot_by_id() != 50998) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vane_checksum_func_response_body_utf8() != 21709) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vaneclient_add_certificate_pin() != 4284) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vaneclient_clear_certificate_pins() != 50096) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_method_vaneclient_delete_request() != 44430) {
@@ -1488,6 +1687,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_method_vaneclient_put_request() != 13810) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vaneclient_set_certificate_pins() != 37780) {
         return InitializationResult.apiChecksumMismatch
     }
 
