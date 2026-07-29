@@ -261,6 +261,16 @@ void*_Nonnull uniffi_vane_fn_clone_vaneclient(void*_Nonnull ptr, RustCallStatus 
 void uniffi_vane_fn_free_vaneclient(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_ADD_CERTIFICATE_PIN
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_ADD_CERTIFICATE_PIN
+void uniffi_vane_fn_method_vaneclient_add_certificate_pin(void*_Nonnull ptr, RustBuffer host, RustBuffer pin, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_CLEAR_CERTIFICATE_PINS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_CLEAR_CERTIFICATE_PINS
+void uniffi_vane_fn_method_vaneclient_clear_certificate_pins(void*_Nonnull ptr, RustBuffer host, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_DELETE_REQUEST
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_DELETE_REQUEST
 RustBuffer uniffi_vane_fn_method_vaneclient_delete_request(void*_Nonnull ptr, RustBuffer url, RustCallStatus *_Nonnull out_status
@@ -291,15 +301,36 @@ RustBuffer uniffi_vane_fn_method_vaneclient_post_request(void*_Nonnull ptr, Rust
 RustBuffer uniffi_vane_fn_method_vaneclient_put_request(void*_Nonnull ptr, RustBuffer url, RustBuffer body, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_SET_CERTIFICATE_PINS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_SET_CERTIFICATE_PINS
+void uniffi_vane_fn_method_vaneclient_set_certificate_pins(void*_Nonnull ptr, RustBuffer host, RustBuffer pins, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_DEFAULT_CONFIG
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_DEFAULT_CONFIG
 RustBuffer uniffi_vane_fn_func_create_default_config(RustCallStatus *_Nonnull out_status
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_PROGRESS
+uint64_t uniffi_vane_fn_func_create_progress(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_VANE_CLIENT
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_VANE_CLIENT
 void*_Nonnull uniffi_vane_fn_func_create_vane_client(RustBuffer config, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_PROGRESS
+void uniffi_vane_fn_func_free_progress(uint64_t id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_PROGRESS_SNAPSHOT_BY_ID
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_PROGRESS_SNAPSHOT_BY_ID
+RustBuffer uniffi_vane_fn_func_progress_snapshot_by_id(uint64_t id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_RESPONSE_BODY_UTF8
@@ -593,15 +624,45 @@ uint16_t uniffi_vane_checksum_func_create_default_config(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_PROGRESS
+uint16_t uniffi_vane_checksum_func_create_progress(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_VANE_CLIENT
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_VANE_CLIENT
 uint16_t uniffi_vane_checksum_func_create_vane_client(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_PROGRESS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_PROGRESS
+uint16_t uniffi_vane_checksum_func_free_progress(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_PROGRESS_SNAPSHOT_BY_ID
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_PROGRESS_SNAPSHOT_BY_ID
+uint16_t uniffi_vane_checksum_func_progress_snapshot_by_id(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_RESPONSE_BODY_UTF8
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_RESPONSE_BODY_UTF8
 uint16_t uniffi_vane_checksum_func_response_body_utf8(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_ADD_CERTIFICATE_PIN
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_ADD_CERTIFICATE_PIN
+uint16_t uniffi_vane_checksum_method_vaneclient_add_certificate_pin(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_CLEAR_CERTIFICATE_PINS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_CLEAR_CERTIFICATE_PINS
+uint16_t uniffi_vane_checksum_method_vaneclient_clear_certificate_pins(void
     
 );
 #endif
@@ -638,6 +699,12 @@ uint16_t uniffi_vane_checksum_method_vaneclient_post_request(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_PUT_REQUEST
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_PUT_REQUEST
 uint16_t uniffi_vane_checksum_method_vaneclient_put_request(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_SET_CERTIFICATE_PINS
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_SET_CERTIFICATE_PINS
+uint16_t uniffi_vane_checksum_method_vaneclient_set_certificate_pins(void
     
 );
 #endif
