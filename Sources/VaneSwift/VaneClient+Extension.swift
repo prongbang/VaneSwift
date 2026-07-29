@@ -35,6 +35,11 @@ let response = try await session.request("/users", method: .post)
 
 // MARK: - Swift Extensions and Helpers
 
+// Shared, never reconfigured — JSONEncoder/JSONDecoder are Sendable and safe to
+// reuse concurrently as long as nothing mutates their configuration.
+private let vaneJSONEncoder = JSONEncoder()
+private let vaneJSONDecoder = JSONDecoder()
+
 public extension VaneResponse {
     init(statusCode: UInt16, headers: [String: String], body: Data, isSuccess: Bool, url: String) {
         self.init(
@@ -478,7 +483,7 @@ public class VaneRequestBuilder {
     }
 
     public func jsonBody<T: Codable>(_ object: T) throws -> VaneRequestBuilder {
-        _ = body(try JSONEncoder().encode(object))
+        _ = body(try vaneJSONEncoder.encode(object))
         setDefaultHeader("Content-Type", "application/json")
         return self
     }
@@ -551,7 +556,7 @@ public class VaneRequestBuilder {
     public func responseJSON<T: Codable>(_ type: T.Type) async throws -> T {
         let response = try await validateStatus()
 
-        return try JSONDecoder().decode(type, from: response.body)
+        return try vaneJSONDecoder.decode(type, from: response.body)
     }
 
     public func responseString() async throws -> String {
@@ -768,7 +773,7 @@ extension VaneResponse {
     }
 
     public func json<T: Codable>(_ type: T.Type) throws -> T {
-        return try JSONDecoder().decode(type, from: body)
+        return try vaneJSONDecoder.decode(type, from: body)
     }
 
     public var prettyJSON: String? {
