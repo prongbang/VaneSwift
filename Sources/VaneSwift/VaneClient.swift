@@ -352,19 +352,29 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
+// Initial value and increment amount for handles. 
+// These ensure that SWIFT handles always have the lowest bit set
+fileprivate let UNIFFI_HANDLEMAP_INITIAL: UInt64 = 1
+fileprivate let UNIFFI_HANDLEMAP_DELTA: UInt64 = 2
+
 fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
     // All mutation happens with this lock held, which is why we implement @unchecked Sendable.
     private let lock = NSLock()
     private var map: [UInt64: T] = [:]
-    private var currentHandle: UInt64 = 1
+    private var currentHandle: UInt64 = UNIFFI_HANDLEMAP_INITIAL
 
     func insert(obj: T) -> UInt64 {
         lock.withLock {
-            let handle = currentHandle
-            currentHandle += 1
-            map[handle] = obj
-            return handle
+            return doInsert(obj)
         }
+    }
+
+    // Low-level insert function, this assumes `lock` is held.
+    private func doInsert(_ obj: T) -> UInt64 {
+        let handle = currentHandle
+        currentHandle += UNIFFI_HANDLEMAP_DELTA
+        map[handle] = obj
+        return handle
     }
 
      func get(handle: UInt64) throws -> T {
@@ -373,6 +383,15 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
                 throw UniffiInternalError.unexpectedStaleHandle
             }
             return obj
+        }
+    }
+
+     func clone(handle: UInt64) throws -> UInt64 {
+        try lock.withLock {
+            guard let obj = map[handle] else {
+                throw UniffiInternalError.unexpectedStaleHandle
+            }
+            return doInsert(obj)
         }
     }
 
@@ -468,7 +487,11 @@ fileprivate struct FfiConverterString: FfiConverter {
             return String()
         }
         let bytes = UnsafeBufferPointer<UInt8>(start: value.data!, count: Int(value.len))
-        return String(bytes: bytes, encoding: String.Encoding.utf8)!
+        // Use Swift's native UTF-8 decoder; `String(bytes:encoding:.utf8)` goes
+        // through Foundation's NSString and silently strips a leading U+FEFF BOM.
+        // Invalid UTF-8 substitutes U+FFFD instead of trapping (unreachable
+        // given Rust's `String` invariant).
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     public static func lower(_ value: String) -> RustBuffer {
@@ -484,7 +507,8 @@ fileprivate struct FfiConverterString: FfiConverter {
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
+        // See `lift` above for why we avoid Foundation's NSString-backed decoder here.
+        return String(decoding: try readBytes(&buf, count: Int(len)), as: UTF8.self)
     }
 
     public static func write(_ value: String, into buf: inout [UInt8]) {
@@ -537,13 +561,13 @@ public protocol VaneClientProtocol: AnyObject, Sendable {
     
 }
 open class VaneClient: VaneClientProtocol, @unchecked Sendable {
-    fileprivate let pointer: UnsafeMutableRawPointer!
+    fileprivate let handle: UInt64
 
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public struct NoPointer {
+    public struct NoHandle {
         public init() {}
     }
 
@@ -553,43 +577,45 @@ open class VaneClient: VaneClientProtocol, @unchecked Sendable {
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
     }
 
     // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
     //
     // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
+    public init(noHandle: NoHandle) {
+        self.handle = 0
     }
 
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_vane_fn_clone_vaneclient(self.pointer, $0) }
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_vane_fn_clone_vaneclient(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
     deinit {
-        guard let pointer = pointer else {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
             return
         }
 
-        try! rustCall { uniffi_vane_fn_free_vaneclient(pointer, $0) }
+        try! rustCall { uniffi_vane_fn_free_vaneclient(handle, $0) }
     }
 
     
 
     
 open func addCertificatePin(host: String, pin: String)throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_add_certificate_pin(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_add_certificate_pin(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(host),
         FfiConverterString.lower(pin),$0
     )
@@ -597,7 +623,8 @@ open func addCertificatePin(host: String, pin: String)throws   {try rustCallWith
 }
     
 open func clearCertificatePins(host: String)throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_clear_certificate_pins(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_clear_certificate_pins(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(host),$0
     )
 }
@@ -605,7 +632,8 @@ open func clearCertificatePins(host: String)throws   {try rustCallWithError(FfiC
     
 open func deleteRequest(url: String)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_delete_request(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_delete_request(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(url),$0
     )
 })
@@ -613,7 +641,8 @@ open func deleteRequest(url: String)throws  -> VaneResponse  {
     
 open func executeRequest(request: VaneRequest)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_execute_request(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_execute_request(
+            self.uniffiCloneHandle(),
         FfiConverterTypeVaneRequest_lower(request),$0
     )
 })
@@ -621,7 +650,8 @@ open func executeRequest(request: VaneRequest)throws  -> VaneResponse  {
     
 open func getRequest(url: String)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_get_request(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_get_request(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(url),$0
     )
 })
@@ -629,7 +659,8 @@ open func getRequest(url: String)throws  -> VaneResponse  {
     
 open func patchRequest(url: String, body: Data?)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_patch_request(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_patch_request(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(url),
         FfiConverterOptionData.lower(body),$0
     )
@@ -638,7 +669,8 @@ open func patchRequest(url: String, body: Data?)throws  -> VaneResponse  {
     
 open func postRequest(url: String, body: Data?)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_post_request(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_post_request(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(url),
         FfiConverterOptionData.lower(body),$0
     )
@@ -647,7 +679,8 @@ open func postRequest(url: String, body: Data?)throws  -> VaneResponse  {
     
 open func putRequest(url: String, body: Data?)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_put_request(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_put_request(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(url),
         FfiConverterOptionData.lower(body),$0
     )
@@ -655,7 +688,8 @@ open func putRequest(url: String, body: Data?)throws  -> VaneResponse  {
 }
     
 open func setCertificatePins(host: String, pins: [String])throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
-    uniffi_vane_fn_method_vaneclient_set_certificate_pins(self.uniffiClonePointer(),
+    uniffi_vane_fn_method_vaneclient_set_certificate_pins(
+            self.uniffiCloneHandle(),
         FfiConverterString.lower(host),
         FfiConverterSequenceString.lower(pins),$0
     )
@@ -663,6 +697,7 @@ open func setCertificatePins(host: String, pins: [String])throws   {try rustCall
 }
     
 
+    
 }
 
 
@@ -670,33 +705,24 @@ open func setCertificatePins(host: String, pins: [String])throws   {try rustCall
 @_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeVaneClient: FfiConverter {
-
-    typealias FfiType = UnsafeMutableRawPointer
+    typealias FfiType = UInt64
     typealias SwiftType = VaneClient
 
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> VaneClient {
-        return VaneClient(unsafeFromRawPointer: pointer)
+    public static func lift(_ handle: UInt64) throws -> VaneClient {
+        return VaneClient(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: VaneClient) -> UnsafeMutableRawPointer {
-        return value.uniffiClonePointer()
+    public static func lower(_ value: VaneClient) -> UInt64 {
+        return value.uniffiCloneHandle()
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneClient {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
     }
 
     public static func write(_ value: VaneClient, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+        writeInt(&buf, lower(value))
     }
 }
 
@@ -704,21 +730,21 @@ public struct FfiConverterTypeVaneClient: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeVaneClient_lift(_ pointer: UnsafeMutableRawPointer) throws -> VaneClient {
-    return try FfiConverterTypeVaneClient.lift(pointer)
+public func FfiConverterTypeVaneClient_lift(_ handle: UInt64) throws -> VaneClient {
+    return try FfiConverterTypeVaneClient.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeVaneClient_lower(_ value: VaneClient) -> UnsafeMutableRawPointer {
+public func FfiConverterTypeVaneClient_lower(_ value: VaneClient) -> UInt64 {
     return FfiConverterTypeVaneClient.lower(value)
 }
 
 
 
 
-public struct VaneClientConfig {
+public struct VaneClientConfig: Equatable, Hashable {
     public var baseUrl: String?
     public var defaultHeaders: [String: String]
     public var dnsOverrides: [String: String]
@@ -766,107 +792,15 @@ public struct VaneClientConfig {
         self.proxyUrl = proxyUrl
         self.proxyAuthorization = proxyAuthorization
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension VaneClientConfig: Sendable {}
 #endif
-
-
-extension VaneClientConfig: Equatable, Hashable {
-    public static func ==(lhs: VaneClientConfig, rhs: VaneClientConfig) -> Bool {
-        if lhs.baseUrl != rhs.baseUrl {
-            return false
-        }
-        if lhs.defaultHeaders != rhs.defaultHeaders {
-            return false
-        }
-        if lhs.dnsOverrides != rhs.dnsOverrides {
-            return false
-        }
-        if lhs.certificatePins != rhs.certificatePins {
-            return false
-        }
-        if lhs.cookiesEnabled != rhs.cookiesEnabled {
-            return false
-        }
-        if lhs.cookiePersistencePath != rhs.cookiePersistencePath {
-            return false
-        }
-        if lhs.connectionPoolEnabled != rhs.connectionPoolEnabled {
-            return false
-        }
-        if lhs.maxIdleConnections != rhs.maxIdleConnections {
-            return false
-        }
-        if lhs.connectionIdleTimeoutSeconds != rhs.connectionIdleTimeoutSeconds {
-            return false
-        }
-        if lhs.retryMaxAttempts != rhs.retryMaxAttempts {
-            return false
-        }
-        if lhs.retryInitialDelayMillis != rhs.retryInitialDelayMillis {
-            return false
-        }
-        if lhs.retryMaxDelayMillis != rhs.retryMaxDelayMillis {
-            return false
-        }
-        if lhs.retryUnsafeMethods != rhs.retryUnsafeMethods {
-            return false
-        }
-        if lhs.maxRequestBodyBytes != rhs.maxRequestBodyBytes {
-            return false
-        }
-        if lhs.maxResponseBodyBytes != rhs.maxResponseBodyBytes {
-            return false
-        }
-        if lhs.timeoutSeconds != rhs.timeoutSeconds {
-            return false
-        }
-        if lhs.followRedirects != rhs.followRedirects {
-            return false
-        }
-        if lhs.userAgent != rhs.userAgent {
-            return false
-        }
-        if lhs.protocolMode != rhs.protocolMode {
-            return false
-        }
-        if lhs.proxyUrl != rhs.proxyUrl {
-            return false
-        }
-        if lhs.proxyAuthorization != rhs.proxyAuthorization {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(baseUrl)
-        hasher.combine(defaultHeaders)
-        hasher.combine(dnsOverrides)
-        hasher.combine(certificatePins)
-        hasher.combine(cookiesEnabled)
-        hasher.combine(cookiePersistencePath)
-        hasher.combine(connectionPoolEnabled)
-        hasher.combine(maxIdleConnections)
-        hasher.combine(connectionIdleTimeoutSeconds)
-        hasher.combine(retryMaxAttempts)
-        hasher.combine(retryInitialDelayMillis)
-        hasher.combine(retryMaxDelayMillis)
-        hasher.combine(retryUnsafeMethods)
-        hasher.combine(maxRequestBodyBytes)
-        hasher.combine(maxResponseBodyBytes)
-        hasher.combine(timeoutSeconds)
-        hasher.combine(followRedirects)
-        hasher.combine(userAgent)
-        hasher.combine(protocolMode)
-        hasher.combine(proxyUrl)
-        hasher.combine(proxyAuthorization)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -940,7 +874,7 @@ public func FfiConverterTypeVaneClientConfig_lower(_ value: VaneClientConfig) ->
 }
 
 
-public struct VaneProgressSnapshot {
+public struct VaneProgressSnapshot: Equatable, Hashable {
     public var uploadSent: UInt64
     public var uploadTotal: UInt64
     public var downloadReceived: UInt64
@@ -956,43 +890,15 @@ public struct VaneProgressSnapshot {
         self.downloadTotal = downloadTotal
         self.done = done
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension VaneProgressSnapshot: Sendable {}
 #endif
-
-
-extension VaneProgressSnapshot: Equatable, Hashable {
-    public static func ==(lhs: VaneProgressSnapshot, rhs: VaneProgressSnapshot) -> Bool {
-        if lhs.uploadSent != rhs.uploadSent {
-            return false
-        }
-        if lhs.uploadTotal != rhs.uploadTotal {
-            return false
-        }
-        if lhs.downloadReceived != rhs.downloadReceived {
-            return false
-        }
-        if lhs.downloadTotal != rhs.downloadTotal {
-            return false
-        }
-        if lhs.done != rhs.done {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(uploadSent)
-        hasher.combine(uploadTotal)
-        hasher.combine(downloadReceived)
-        hasher.combine(downloadTotal)
-        hasher.combine(done)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1034,7 +940,7 @@ public func FfiConverterTypeVaneProgressSnapshot_lower(_ value: VaneProgressSnap
 }
 
 
-public struct VaneRequest {
+public struct VaneRequest: Equatable, Hashable {
     public var url: String
     public var method: String
     public var headers: [String: String]
@@ -1062,67 +968,15 @@ public struct VaneRequest {
         self.timeoutSeconds = timeoutSeconds
         self.followRedirects = followRedirects
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension VaneRequest: Sendable {}
 #endif
-
-
-extension VaneRequest: Equatable, Hashable {
-    public static func ==(lhs: VaneRequest, rhs: VaneRequest) -> Bool {
-        if lhs.url != rhs.url {
-            return false
-        }
-        if lhs.method != rhs.method {
-            return false
-        }
-        if lhs.headers != rhs.headers {
-            return false
-        }
-        if lhs.queryParams != rhs.queryParams {
-            return false
-        }
-        if lhs.body != rhs.body {
-            return false
-        }
-        if lhs.bodyFilePath != rhs.bodyFilePath {
-            return false
-        }
-        if lhs.responseBodyPath != rhs.responseBodyPath {
-            return false
-        }
-        if lhs.cancelTokenId != rhs.cancelTokenId {
-            return false
-        }
-        if lhs.progressId != rhs.progressId {
-            return false
-        }
-        if lhs.timeoutSeconds != rhs.timeoutSeconds {
-            return false
-        }
-        if lhs.followRedirects != rhs.followRedirects {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(url)
-        hasher.combine(method)
-        hasher.combine(headers)
-        hasher.combine(queryParams)
-        hasher.combine(body)
-        hasher.combine(bodyFilePath)
-        hasher.combine(responseBodyPath)
-        hasher.combine(cancelTokenId)
-        hasher.combine(progressId)
-        hasher.combine(timeoutSeconds)
-        hasher.combine(followRedirects)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1176,7 +1030,7 @@ public func FfiConverterTypeVaneRequest_lower(_ value: VaneRequest) -> RustBuffe
 }
 
 
-public struct VaneResponse {
+public struct VaneResponse: Equatable, Hashable {
     public var statusCode: UInt16
     public var headers: [String: String]
     public var body: Data
@@ -1194,47 +1048,15 @@ public struct VaneResponse {
         self.isSuccess = isSuccess
         self.url = url
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension VaneResponse: Sendable {}
 #endif
-
-
-extension VaneResponse: Equatable, Hashable {
-    public static func ==(lhs: VaneResponse, rhs: VaneResponse) -> Bool {
-        if lhs.statusCode != rhs.statusCode {
-            return false
-        }
-        if lhs.headers != rhs.headers {
-            return false
-        }
-        if lhs.body != rhs.body {
-            return false
-        }
-        if lhs.bodyFilePath != rhs.bodyFilePath {
-            return false
-        }
-        if lhs.isSuccess != rhs.isSuccess {
-            return false
-        }
-        if lhs.url != rhs.url {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(statusCode)
-        hasher.combine(headers)
-        hasher.combine(body)
-        hasher.combine(bodyFilePath)
-        hasher.combine(isSuccess)
-        hasher.combine(url)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1278,14 +1100,81 @@ public func FfiConverterTypeVaneResponse_lower(_ value: VaneResponse) -> RustBuf
 }
 
 
-public enum VaneError: Swift.Error {
+/**
+ * The variant is the machine-readable kind; every one carries the same
+ * human-readable message the caller has always seen, so `Display` output and
+ * catch-all handling are unchanged. `Generic` means "not classified", not
+ * "internal" — new call sites may land there and callers must treat it as
+ * unknown rather than as any particular failure.
+ *
+ * No variant carries structured detail beyond the message: a `Tls` mismatch
+ * deliberately exposes no host or pin field, so error handling cannot become a
+ * pin oracle.
+ */
+public enum VaneError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
     case Generic(String
     )
+    /**
+     * The caller's request or configuration is wrong — URL, scheme, method,
+     * header, body file, pin or proxy setting. Fails identically on every
+     * transport.
+     */
+    case InvalidRequest(String
+    )
+    /**
+     * The request's cancel token was set.
+     */
+    case Cancelled(String
+    )
+    /**
+     * The connection could not be established within the deadline. Nothing
+     * reached the peer, so the request is safe to replay.
+     */
+    case ConnectTimeout(String
+    )
+    /**
+     * The deadline expired with the connection already up.
+     */
+    case Timeout(String
+    )
+    /**
+     * Network or protocol failure: DNS, socket, QUIC, HTTP/3 framing, proxy.
+     */
+    case Transport(String
+    )
+    /**
+     * Certificate verification failed, including a pin mismatch.
+     */
+    case Tls(String
+    )
+    /**
+     * A request or response body exceeded the configured limit.
+     */
+    case BodyLimitExceeded(String
+    )
+    /**
+     * The requested protocol is not available in this build.
+     */
+    case ProtocolUnsupported(String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
 }
 
+#if compiler(>=6)
+extension VaneError: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1303,6 +1192,30 @@ public struct FfiConverterTypeVaneError: FfiConverterRustBuffer {
         case 1: return .Generic(
             try FfiConverterString.read(from: &buf)
             )
+        case 2: return .InvalidRequest(
+            try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .Cancelled(
+            try FfiConverterString.read(from: &buf)
+            )
+        case 4: return .ConnectTimeout(
+            try FfiConverterString.read(from: &buf)
+            )
+        case 5: return .Timeout(
+            try FfiConverterString.read(from: &buf)
+            )
+        case 6: return .Transport(
+            try FfiConverterString.read(from: &buf)
+            )
+        case 7: return .Tls(
+            try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .BodyLimitExceeded(
+            try FfiConverterString.read(from: &buf)
+            )
+        case 9: return .ProtocolUnsupported(
+            try FfiConverterString.read(from: &buf)
+            )
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1317,6 +1230,46 @@ public struct FfiConverterTypeVaneError: FfiConverterRustBuffer {
         
         case let .Generic(v1):
             writeInt(&buf, Int32(1))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .InvalidRequest(v1):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .Cancelled(v1):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .ConnectTimeout(v1):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .Timeout(v1):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .Transport(v1):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .Tls(v1):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .BodyLimitExceeded(v1):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(v1, into: &buf)
+            
+        
+        case let .ProtocolUnsupported(v1):
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(v1, into: &buf)
             
         }
@@ -1338,36 +1291,35 @@ public func FfiConverterTypeVaneError_lower(_ value: VaneError) -> RustBuffer {
     return FfiConverterTypeVaneError.lower(value)
 }
 
-
-extension VaneError: Equatable, Hashable {}
-
-
-
-extension VaneError: Foundation.LocalizedError {
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
-}
-
-
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
-public enum VaneProtocolMode {
+public enum VaneProtocolMode: Equatable, Hashable {
     
     /**
-     * Kept for source compatibility; this build uses HTTP/3 only.
+     * HTTP/3 first, falling back to HTTP/2 or HTTP/1.1 over TCP when the
+     * HTTP/3 transport fails. Needs the `tcp-fallback` build feature.
      */
     case http3ThenHttp2ThenHttp1
     case http3Only
     /**
-     * Kept for source compatibility; HTTP/2 and HTTP/1.1 are unsupported.
+     * TCP with ALPN negotiating HTTP/2 or HTTP/1.1. Needs `tcp-fallback`.
      */
     case http2ThenHttp1
+    /**
+     * TCP with HTTP/2 prior knowledge. Needs `tcp-fallback`.
+     */
     case http2Only
+    /**
+     * TCP restricted to HTTP/1.1. Needs `tcp-fallback`.
+     */
     case http1Only
-}
 
+
+
+
+
+}
 
 #if compiler(>=6)
 extension VaneProtocolMode: Sendable {}
@@ -1438,10 +1390,6 @@ public func FfiConverterTypeVaneProtocolMode_lift(_ buf: RustBuffer) throws -> V
 public func FfiConverterTypeVaneProtocolMode_lower(_ value: VaneProtocolMode) -> RustBuffer {
     return FfiConverterTypeVaneProtocolMode.lower(value)
 }
-
-
-extension VaneProtocolMode: Equatable, Hashable {}
-
 
 
 #if swift(>=5.8)
@@ -1641,7 +1589,7 @@ private enum InitializationResult {
 // the code inside is only computed once.
 private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
-    let bindings_contract_version = 29
+    let bindings_contract_version = 30
     // Get the scaffolding contract version by calling the into the dylib
     let scaffolding_contract_version = ffi_vane_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {

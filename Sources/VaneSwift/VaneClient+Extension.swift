@@ -475,7 +475,7 @@ public class VaneRequestBuilder {
         contentType: String = "text/plain; charset=utf-8"
     ) throws -> VaneRequestBuilder {
         guard let data = text.data(using: encoding) else {
-            throw VaneError.Generic("Failed to encode request text body")
+            throw VaneError.InvalidRequest("Failed to encode request text body")
         }
         _ = body(data)
         setDefaultHeader("Content-Type", contentType)
@@ -612,7 +612,7 @@ public extension VaneResponse {
 private func formURLEncoded(_ fields: [String: String]) throws -> String {
     try fields.keys.sorted().map { key in
         guard let value = fields[key] else {
-            throw VaneError.Generic("Missing form value for \(key)")
+            throw VaneError.InvalidRequest("Missing form value for \(key)")
         }
         return "\(formEncode(key))=\(formEncode(value))"
     }.joined(separator: "&")
