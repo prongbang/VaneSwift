@@ -1037,16 +1037,52 @@ public struct VaneResponse: Equatable, Hashable {
     public var bodyFilePath: String?
     public var isSuccess: Bool
     public var url: String
+    /**
+     * Raw `Set-Cookie` values from the final response, in wire order.
+     *
+     * Unfiltered: a cookie the jar refused (a `Domain` that is a public
+     * suffix, or an IP literal) still appears here, because this reports what
+     * the server sent. Never folded into `headers` — a `HashMap` cannot hold
+     * repeats and RFC 6265 forbids comma-joining `Set-Cookie` (an `Expires`
+     * value contains a comma, so the join is unsplittable).
+     *
+     * Redirects: the final response only. Intermediate hops still reach the
+     * cookie jar as before.
+     */
+    public var setCookie: [String]
+    /**
+     * Protocol that served the final response. `None` when no exchange
+     * completed, or when the transport could not say.
+     */
+    public var httpVersion: VaneHttpVersion?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(statusCode: UInt16, headers: [String: String], body: Data, bodyFilePath: String?, isSuccess: Bool, url: String) {
+    public init(statusCode: UInt16, headers: [String: String], body: Data, bodyFilePath: String?, isSuccess: Bool, url: String, 
+        /**
+         * Raw `Set-Cookie` values from the final response, in wire order.
+         *
+         * Unfiltered: a cookie the jar refused (a `Domain` that is a public
+         * suffix, or an IP literal) still appears here, because this reports what
+         * the server sent. Never folded into `headers` — a `HashMap` cannot hold
+         * repeats and RFC 6265 forbids comma-joining `Set-Cookie` (an `Expires`
+         * value contains a comma, so the join is unsplittable).
+         *
+         * Redirects: the final response only. Intermediate hops still reach the
+         * cookie jar as before.
+         */setCookie: [String] = [], 
+        /**
+         * Protocol that served the final response. `None` when no exchange
+         * completed, or when the transport could not say.
+         */httpVersion: VaneHttpVersion? = nil) {
         self.statusCode = statusCode
         self.headers = headers
         self.body = body
         self.bodyFilePath = bodyFilePath
         self.isSuccess = isSuccess
         self.url = url
+        self.setCookie = setCookie
+        self.httpVersion = httpVersion
     }
 
     
@@ -1070,7 +1106,9 @@ public struct FfiConverterTypeVaneResponse: FfiConverterRustBuffer {
                 body: FfiConverterData.read(from: &buf), 
                 bodyFilePath: FfiConverterOptionString.read(from: &buf), 
                 isSuccess: FfiConverterBool.read(from: &buf), 
-                url: FfiConverterString.read(from: &buf)
+                url: FfiConverterString.read(from: &buf), 
+                setCookie: FfiConverterSequenceString.read(from: &buf), 
+                httpVersion: FfiConverterOptionTypeVaneHttpVersion.read(from: &buf)
         )
     }
 
@@ -1081,6 +1119,8 @@ public struct FfiConverterTypeVaneResponse: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.bodyFilePath, into: &buf)
         FfiConverterBool.write(value.isSuccess, into: &buf)
         FfiConverterString.write(value.url, into: &buf)
+        FfiConverterSequenceString.write(value.setCookie, into: &buf)
+        FfiConverterOptionTypeVaneHttpVersion.write(value.httpVersion, into: &buf)
     }
 }
 
@@ -1293,6 +1333,91 @@ public func FfiConverterTypeVaneError_lower(_ value: VaneError) -> RustBuffer {
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Protocol a response was actually served over, as opposed to the
+ * [`VaneProtocolMode`] the request asked for.
+ */
+
+public enum VaneHttpVersion: Equatable, Hashable {
+    
+    case http10
+    case http11
+    case http2
+    case http3
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VaneHttpVersion: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneHttpVersion: FfiConverterRustBuffer {
+    typealias SwiftType = VaneHttpVersion
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneHttpVersion {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .http10
+        
+        case 2: return .http11
+        
+        case 3: return .http2
+        
+        case 4: return .http3
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VaneHttpVersion, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .http10:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .http11:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .http2:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .http3:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneHttpVersion_lift(_ buf: RustBuffer) throws -> VaneHttpVersion {
+    return try FfiConverterTypeVaneHttpVersion.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneHttpVersion_lower(_ value: VaneHttpVersion) -> RustBuffer {
+    return FfiConverterTypeVaneHttpVersion.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum VaneProtocolMode: Equatable, Hashable {
     
@@ -1459,6 +1584,30 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeVaneHttpVersion: FfiConverterRustBuffer {
+    typealias SwiftType = VaneHttpVersion?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVaneHttpVersion.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVaneHttpVersion.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
