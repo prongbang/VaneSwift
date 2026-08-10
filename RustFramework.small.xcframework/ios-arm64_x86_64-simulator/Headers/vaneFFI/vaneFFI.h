@@ -298,6 +298,17 @@ RustBuffer uniffi_vane_fn_method_vaneclient_put_request(uint64_t ptr, RustBuffer
 void uniffi_vane_fn_method_vaneclient_set_certificate_pins(uint64_t ptr, RustBuffer host, RustBuffer pins, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CANCEL_BY_ID
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CANCEL_BY_ID
+void uniffi_vane_fn_func_cancel_by_id(uint64_t id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_CANCEL_TOKEN
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_CANCEL_TOKEN
+uint64_t uniffi_vane_fn_func_create_cancel_token(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_DEFAULT_CONFIG
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_DEFAULT_CONFIG
 RustBuffer uniffi_vane_fn_func_create_default_config(RustCallStatus *_Nonnull out_status
@@ -313,6 +324,11 @@ uint64_t uniffi_vane_fn_func_create_progress(RustCallStatus *_Nonnull out_status
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_VANE_CLIENT
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_VANE_CLIENT
 uint64_t uniffi_vane_fn_func_create_vane_client(RustBuffer config, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_CANCEL_TOKEN
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_CANCEL_TOKEN
+void uniffi_vane_fn_func_free_cancel_token(uint64_t id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_PROGRESS
@@ -590,6 +606,18 @@ void ffi_vane_rust_future_free_void(uint64_t handle
 void ffi_vane_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CANCEL_BY_ID
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CANCEL_BY_ID
+uint16_t uniffi_vane_checksum_func_cancel_by_id(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_CANCEL_TOKEN
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_CANCEL_TOKEN
+uint16_t uniffi_vane_checksum_func_create_cancel_token(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_DEFAULT_CONFIG
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_DEFAULT_CONFIG
 uint16_t uniffi_vane_checksum_func_create_default_config(void
@@ -605,6 +633,12 @@ uint16_t uniffi_vane_checksum_func_create_progress(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_VANE_CLIENT
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_VANE_CLIENT
 uint16_t uniffi_vane_checksum_func_create_vane_client(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_CANCEL_TOKEN
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_CANCEL_TOKEN
+uint16_t uniffi_vane_checksum_func_free_cancel_token(void
     
 );
 #endif

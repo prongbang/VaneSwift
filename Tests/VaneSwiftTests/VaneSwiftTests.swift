@@ -376,6 +376,65 @@ struct VaneSwiftTests {
     }
 
     @Test
+    func cancelTokenLifecycleIsIdempotentAgainstTheNativeRegistry() {
+        let first = VaneCancelToken()
+        let second = VaneCancelToken()
+
+        #expect(first.id != second.id)
+        #expect(!first.isCancelled)
+
+        first.cancel()
+        first.cancel()
+
+        #expect(first.isCancelled)
+        #expect(!second.isCancelled)
+
+        // Explicit free ahead of deinit: the deinit free that follows is the
+        // double-free, and both it and cancel-after-free must be no-ops.
+        freeCancelToken(id: first.id)
+        cancelById(id: first.id)
+
+        second.cancel()
+        #expect(second.isCancelled)
+    }
+
+    @Test
+    func builderCarriesCancelTokenIdOnRequests() async throws {
+        let captured = CapturedRequestBox()
+        let session = try VaneSession(
+            configuration: VaneConfigurationBuilder().http3Only().build(),
+            requestInterceptors: [
+                { request in
+                    captured.request = request
+                    return request
+                }
+            ],
+            errorInterceptors: [
+                { _ in
+                    VaneResponse(
+                        statusCode: 204,
+                        headers: [:],
+                        body: Data(),
+                        isSuccess: true,
+                        url: "interceptor://synthetic"
+                    )
+                }
+            ]
+        )
+
+        let token = VaneCancelToken()
+        _ = try await session.request("http://example.com/slow")
+            .cancelToken(token)
+            .execute()
+
+        #expect(captured.request?.cancelTokenId == token.id)
+
+        _ = try await session.request("http://example.com/plain").execute()
+
+        #expect(captured.request?.cancelTokenId == nil)
+    }
+
+    @Test
     func responseValidationHelpersThrowOnUnexpectedStatus() throws {
         let response = VaneResponse(
             statusCode: 404,

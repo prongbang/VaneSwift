@@ -175,6 +175,50 @@ public struct VaneMultipartFile: Sendable {
     }
 }
 
+/// Cancels an in-flight request from any thread.
+///
+/// The native token is created eagerly at init — unlike Dart, whose token
+/// reaches the core over an async platform channel and therefore latches a
+/// cancel issued before registration — so `cancel()` always reaches the core
+/// immediately.
+///
+/// Attach it with `VaneRequestBuilder.cancelToken(_:)`, or set `id` as
+/// `VaneRequest.cancelTokenId` when building requests by hand. A cancelled
+/// token stays cancelled, so reuse on a second request aborts that one too.
+///
+/// Ownership: the token owns its native registry entry and releases it in
+/// `deinit`. Keep the token alive while the request is in flight — a request
+/// whose token has been deallocated keeps running but can no longer be
+/// cancelled. The core never reuses ids, so a cancel or free racing
+/// deallocation is a safe no-op.
+public final class VaneCancelToken: @unchecked Sendable {
+    public let id: UInt64
+
+    private let lock = NSLock()
+    private var cancelled = false
+
+    public init() {
+        id = createCancelToken()
+    }
+
+    public var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    public func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+        cancelById(id: id)
+    }
+
+    deinit {
+        freeCancelToken(id: id)
+    }
+}
+
 @available(iOS 13.0, *)
 public class VaneSession {
     private let client: VaneClient
@@ -435,6 +479,11 @@ public class VaneRequestBuilder {
 
     public func onDownloadProgress(_ callback: @escaping VaneProgressCallback) -> VaneRequestBuilder {
         downloadProgress = callback
+        return self
+    }
+
+    public func cancelToken(_ token: VaneCancelToken) -> VaneRequestBuilder {
+        request.cancelTokenId = token.id
         return self
     }
 

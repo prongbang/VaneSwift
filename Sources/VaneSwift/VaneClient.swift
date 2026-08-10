@@ -1689,6 +1689,18 @@ fileprivate struct FfiConverterDictionaryStringSequenceString: FfiConverterRustB
         return dict
     }
 }
+public func cancelById(id: UInt64)  {try! rustCall() {
+    uniffi_vane_fn_func_cancel_by_id(
+        FfiConverterUInt64.lower(id),$0
+    )
+}
+}
+public func createCancelToken() -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_vane_fn_func_create_cancel_token($0
+    )
+})
+}
 public func createDefaultConfig() -> VaneClientConfig  {
     return try!  FfiConverterTypeVaneClientConfig_lift(try! rustCall() {
     uniffi_vane_fn_func_create_default_config($0
@@ -1707,6 +1719,12 @@ public func createVaneClient(config: VaneClientConfig)throws  -> VaneClient  {
         FfiConverterTypeVaneClientConfig_lower(config),$0
     )
 })
+}
+public func freeCancelToken(id: UInt64)  {try! rustCall() {
+    uniffi_vane_fn_func_free_cancel_token(
+        FfiConverterUInt64.lower(id),$0
+    )
+}
 }
 public func freeProgress(id: UInt64)  {try! rustCall() {
     uniffi_vane_fn_func_free_progress(
@@ -1744,6 +1762,12 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_vane_checksum_func_cancel_by_id() != 63899) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_func_create_cancel_token() != 2029) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vane_checksum_func_create_default_config() != 54371) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1751,6 +1775,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_func_create_vane_client() != 57471) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_func_free_cancel_token() != 20515) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_func_free_progress() != 42043) {
