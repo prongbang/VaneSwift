@@ -298,6 +298,11 @@ RustBuffer uniffi_vane_fn_method_vaneclient_put_request(uint64_t ptr, RustBuffer
 void uniffi_vane_fn_method_vaneclient_set_certificate_pins(uint64_t ptr, RustBuffer host, RustBuffer pins, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_WARMUP
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_WARMUP
+void uniffi_vane_fn_method_vaneclient_warmup(uint64_t ptr, RustBuffer url, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CANCEL_BY_ID
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CANCEL_BY_ID
 void uniffi_vane_fn_func_cancel_by_id(uint64_t id, RustCallStatus *_Nonnull out_status
@@ -711,6 +716,12 @@ uint16_t uniffi_vane_checksum_method_vaneclient_put_request(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_SET_CERTIFICATE_PINS
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_SET_CERTIFICATE_PINS
 uint16_t uniffi_vane_checksum_method_vaneclient_set_certificate_pins(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_WARMUP
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_WARMUP
+uint16_t uniffi_vane_checksum_method_vaneclient_warmup(void
     
 );
 #endif

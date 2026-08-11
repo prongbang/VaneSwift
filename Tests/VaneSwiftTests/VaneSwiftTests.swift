@@ -130,6 +130,34 @@ struct VaneSwiftTests {
     }
 
     @Test
+    func warmupIsBestEffortAndNeverThrows() async throws {
+        // Http3Only with no baseURL and no url: the no-op path. The contract
+        // under test is that warmup can never throw — failures are swallowed
+        // by the core — and that repeat calls are safe.
+        let session = try VaneSession(
+            configuration: VaneConfigurationBuilder()
+                .http3Only()
+                .timeout(2)
+                .build()
+        )
+        await session.warmup()
+        // A URL the core refuses (not https) is swallowed, not thrown.
+        await session.warmup("http://example.com/")
+        // Repeat calls stay cheap and equally silent.
+        await session.warmup()
+
+        // Same contract on the client-level async API.
+        let client = try createVaneClient(
+            config: VaneConfigurationBuilder()
+                .http3Only()
+                .timeout(2)
+                .build()
+        )
+        await client.warmup()
+        await client.warmup("not a url")
+    }
+
+    @Test
     func post() async throws {
         guard let baseURL = integrationBaseURL() else { return }
         let config = VaneConfigurationBuilder()

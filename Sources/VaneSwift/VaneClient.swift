@@ -487,11 +487,7 @@ fileprivate struct FfiConverterString: FfiConverter {
             return String()
         }
         let bytes = UnsafeBufferPointer<UInt8>(start: value.data!, count: Int(value.len))
-        // Use Swift's native UTF-8 decoder; `String(bytes:encoding:.utf8)` goes
-        // through Foundation's NSString and silently strips a leading U+FEFF BOM.
-        // Invalid UTF-8 substitutes U+FFFD instead of trapping (unreachable
-        // given Rust's `String` invariant).
-        return String(decoding: bytes, as: UTF8.self)
+        return String(bytes: bytes, encoding: String.Encoding.utf8)!
     }
 
     public static func lower(_ value: String) -> RustBuffer {
@@ -507,8 +503,7 @@ fileprivate struct FfiConverterString: FfiConverter {
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        // See `lift` above for why we avoid Foundation's NSString-backed decoder here.
-        return String(decoding: try readBytes(&buf, count: Int(len)), as: UTF8.self)
+        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
     }
 
     public static func write(_ value: String, into buf: inout [UInt8]) {
@@ -558,6 +553,33 @@ public protocol VaneClientProtocol: AnyObject, Sendable {
     func putRequest(url: String, body: Data?) throws  -> VaneResponse
     
     func setCertificatePins(host: String, pins: [String]) throws 
+    
+    /**
+     * Pays the client's one-time setup and connection cost up front — call it
+     * once at app startup, from a background thread (it blocks, exactly like
+     * `execute_request`), so the first real request doesn't pay it.
+     *
+     * What gets warmed follows the configured protocol mode:
+     * - HTTP/3-capable modes establish one pooled QUIC+TLS connection to
+     * `url` (or `base_url` when `url` is empty). No HTTP request is sent.
+     * - TCP-capable modes build and cache the TCP client (tokio runtime, TLS
+     * config, platform trust verifier) and run one TLS handshake to the
+     * target — on Android that first verification loads the system trust
+     * store and is the bulk of the measured ~1 s first-request cost. Again
+     * no HTTP request: the server sees a handshake and a clean close.
+     * - `Http3Only` never touches TCP machinery, so it stays as light as it
+     * is today.
+     *
+     * With neither `url` nor `base_url` there is nothing to connect to;
+     * TCP-capable modes still do the construction, which is most of the win.
+     *
+     * Best effort by contract: failures are swallowed. Every error it could
+     * raise is either transient (no network yet — exactly the startup
+     * condition this exists for) or will be reported, with a better message,
+     * by the first real request. Idempotent and cheap on repeat calls; safe
+     * to call concurrently with requests from any thread.
+     */
+    func warmup(url: String?) 
     
 }
 open class VaneClient: VaneClientProtocol, @unchecked Sendable {
@@ -692,6 +714,39 @@ open func setCertificatePins(host: String, pins: [String])throws   {try rustCall
             self.uniffiCloneHandle(),
         FfiConverterString.lower(host),
         FfiConverterSequenceString.lower(pins),$0
+    )
+}
+}
+    
+    /**
+     * Pays the client's one-time setup and connection cost up front — call it
+     * once at app startup, from a background thread (it blocks, exactly like
+     * `execute_request`), so the first real request doesn't pay it.
+     *
+     * What gets warmed follows the configured protocol mode:
+     * - HTTP/3-capable modes establish one pooled QUIC+TLS connection to
+     * `url` (or `base_url` when `url` is empty). No HTTP request is sent.
+     * - TCP-capable modes build and cache the TCP client (tokio runtime, TLS
+     * config, platform trust verifier) and run one TLS handshake to the
+     * target — on Android that first verification loads the system trust
+     * store and is the bulk of the measured ~1 s first-request cost. Again
+     * no HTTP request: the server sees a handshake and a clean close.
+     * - `Http3Only` never touches TCP machinery, so it stays as light as it
+     * is today.
+     *
+     * With neither `url` nor `base_url` there is nothing to connect to;
+     * TCP-capable modes still do the construction, which is most of the win.
+     *
+     * Best effort by contract: failures are swallowed. Every error it could
+     * raise is either transient (no network yet — exactly the startup
+     * condition this exists for) or will be reported, with a better message,
+     * by the first real request. Idempotent and cheap on repeat calls; safe
+     * to call concurrently with requests from any thread.
+     */
+open func warmup(url: String?)  {try! rustCall() {
+    uniffi_vane_fn_method_vaneclient_warmup(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionString.lower(url),$0
     )
 }
 }
@@ -1032,6 +1087,14 @@ public func FfiConverterTypeVaneRequest_lower(_ value: VaneRequest) -> RustBuffe
 
 public struct VaneResponse: Equatable, Hashable {
     public var statusCode: UInt16
+    /**
+     * One entry per header name, keyed lowercase. A name the server repeated
+     * carries its values comma-joined in wire order (`"a, b"`, RFC 9110
+     * §5.2) — identically on both transports. Two exceptions: `set-cookie`
+     * (see [`Self::set_cookie`]) and `location`, which is single-valued by
+     * RFC 9110 §10.2.2 and keeps its first occurrence — the one the redirect
+     * gate acts on — rather than joining into a non-URL.
+     */
     public var headers: [String: String]
     public var body: Data
     public var bodyFilePath: String?
@@ -1058,7 +1121,15 @@ public struct VaneResponse: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(statusCode: UInt16, headers: [String: String], body: Data, bodyFilePath: String?, isSuccess: Bool, url: String, 
+    public init(statusCode: UInt16, 
+        /**
+         * One entry per header name, keyed lowercase. A name the server repeated
+         * carries its values comma-joined in wire order (`"a, b"`, RFC 9110
+         * §5.2) — identically on both transports. Two exceptions: `set-cookie`
+         * (see [`Self::set_cookie`]) and `location`, which is single-valued by
+         * RFC 9110 §10.2.2 and keeps its first occurrence — the one the redirect
+         * gate acts on — rather than joining into a non-URL.
+         */headers: [String: String], body: Data, bodyFilePath: String?, isSuccess: Bool, url: String, 
         /**
          * Raw `Set-Cookie` values from the final response, in wire order.
          *
@@ -1814,6 +1885,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_method_vaneclient_set_certificate_pins() != 37780) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vaneclient_warmup() != 42407) {
         return InitializationResult.apiChecksumMismatch
     }
 

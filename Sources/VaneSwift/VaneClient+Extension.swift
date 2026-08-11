@@ -140,6 +140,24 @@ extension VaneClient {
             }
         }
     }
+
+    /// Best-effort warm-up of the client's one-time setup and connection
+    /// cost, so the first real request doesn't pay it. Call it once, early
+    /// (e.g. during app launch); it never throws and repeat calls are cheap.
+    ///
+    /// `url` picks the origin to pre-connect (HTTP/3) or probe (TCP); `nil`
+    /// falls back to the client's `baseUrl`. Runs the blocking core call
+    /// (`warmup(url:)`) off the caller's thread — see that method's docs for
+    /// what each protocol mode warms.
+    @available(iOS 13.0, *)
+    public func warmup(_ url: String? = nil) async {
+        await withCheckedContinuation { continuation in
+            Task.detached(priority: .utility) { @Sendable in
+                self.warmup(url: url)
+                continuation.resume()
+            }
+        }
+    }
 }
 
 // MARK: - Alamofire-style Interface
@@ -286,6 +304,12 @@ public class VaneSession {
     public func clearCertificatePins(host: String) throws -> VaneSession {
         try client.clearCertificatePins(host: host)
         return self
+    }
+
+    /// Best-effort warm-up of the underlying client; see
+    /// `VaneClient.warmup(_:)`. Never throws.
+    public func warmup(_ url: String? = nil) async {
+        await client.warmup(url)
     }
 
     // MARK: - Direct Methods
