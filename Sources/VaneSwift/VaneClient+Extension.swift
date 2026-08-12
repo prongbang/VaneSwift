@@ -53,92 +53,72 @@ public extension VaneResponse {
     }
 }
 
+/// Runs every blocking core FFI call. Two deliberate choices:
+///
+/// - A GCD queue, not `Task.detached`: the core call parks its thread for the
+///   whole request, and a detached task does that inside Swift's width-limited
+///   cooperative pool — N concurrent requests could starve or deadlock it. GCD
+///   overcommits instead, so blocked requests just occupy plain threads.
+/// - Explicit `.default` QoS, never the caller's: `.utility` put every I/O
+///   wakeup — and the lazily spawned tokio reactor thread, which inherits its
+///   creator's QoS — in a low scheduler band, producing a fat p95 latency tail
+///   on iOS. `.default` matches the band URLSession's own I/O threads run in.
+///
+/// Concurrent, not serial: the core client is internally synchronized, and a
+/// serial queue would chain independent requests' network round-trips.
+private let vaneFFIQueue = DispatchQueue(
+    label: "com.vane.swift.blocking-ffi",
+    qos: .default,
+    attributes: .concurrent
+)
+
 extension VaneClient {
 
     // MARK: - Async/Await Support
 
+    /// Bridges a blocking core call on `vaneFFIQueue` back into async Swift.
+    /// `resume(with: Result(catching:))` resumes exactly once on every path.
+    /// Cancellation is unchanged from the previous `Task.detached` bridge: a
+    /// started core call runs to completion; cancel via `VaneCancelToken`.
     @available(iOS 13.0, *)
-    public func get(_ url: String) async throws -> VaneResponse {
+    private func runBlockingFFI<T: Sendable>(
+        _ work: @escaping @Sendable () throws -> T
+    ) async throws -> T {
         return try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .utility) { @Sendable in
-                do {
-                    let response = try self.getRequest(url: url)
-                    continuation.resume(returning: response)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
+            vaneFFIQueue.async {
+                continuation.resume(with: Result(catching: work))
             }
         }
+    }
+
+    @available(iOS 13.0, *)
+    public func get(_ url: String) async throws -> VaneResponse {
+        return try await runBlockingFFI { try self.getRequest(url: url) }
     }
 
     @available(iOS 13.0, *)
     public func post(_ url: String, body: Data? = nil) async throws -> VaneResponse {
-        return try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .utility) { @Sendable in
-                do {
-                    let response = try self.postRequest(url: url, body: body)
-                    continuation.resume(returning: response)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        return try await runBlockingFFI { try self.postRequest(url: url, body: body) }
     }
 
     @available(iOS 13.0, *)
     public func put(_ url: String, body: Data? = nil) async throws -> VaneResponse {
-        return try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .utility) { @Sendable in
-                do {
-                    let response = try self.putRequest(url: url, body: body)
-                    continuation.resume(returning: response)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        return try await runBlockingFFI { try self.putRequest(url: url, body: body) }
     }
 
     @available(iOS 13.0, *)
     public func delete(_ url: String) async throws -> VaneResponse {
-        return try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .utility) { @Sendable in
-                do {
-                    let response = try self.deleteRequest(url: url)
-                    continuation.resume(returning: response)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        return try await runBlockingFFI { try self.deleteRequest(url: url) }
     }
 
     @available(iOS 13.0, *)
     public func patch(_ url: String, body: Data? = nil) async throws -> VaneResponse {
-        return try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .utility) { @Sendable in
-                do {
-                    let response = try self.patchRequest(url: url, body: body)
-                    continuation.resume(returning: response)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        return try await runBlockingFFI { try self.patchRequest(url: url, body: body) }
     }
 
     @available(iOS 13.0, *)
     public func execute(_ request: VaneRequest) async throws -> VaneResponse {
-        return try await withCheckedThrowingContinuation { continuation in
-            Task.detached(priority: .utility) { @Sendable in
-                do {
-                    let response = try self.executeRequest(request: request)
-                    continuation.resume(returning: response)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        return try await runBlockingFFI { try self.executeRequest(request: request) }
     }
 
     /// Best-effort warm-up of the client's one-time setup and connection
@@ -151,12 +131,9 @@ extension VaneClient {
     /// what each protocol mode warms.
     @available(iOS 13.0, *)
     public func warmup(_ url: String? = nil) async {
-        await withCheckedContinuation { continuation in
-            Task.detached(priority: .utility) { @Sendable in
-                self.warmup(url: url)
-                continuation.resume()
-            }
-        }
+        // The core warmup never throws; `try?` only satisfies the shared
+        // helper's signature.
+        try? await runBlockingFFI { self.warmup(url: url) }
     }
 }
 
