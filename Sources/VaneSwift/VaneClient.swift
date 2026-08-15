@@ -1229,6 +1229,14 @@ public struct VaneRequest: Equatable, Hashable {
     public var queryParams: [String: String]
     public var body: Data?
     public var bodyFilePath: String?
+    /**
+     * A [`create_body_stream`] id: the caller pushes the body in chunks
+     * instead of materializing it. Mutually exclusive with `body` and
+     * `body_file_path`. A streamed body is one-shot — see the streamed-body
+     * rules on retry, redirects and transport fallback in
+     * `docs/upload-streaming-design.md`.
+     */
+    public var bodyStreamId: UInt64?
     public var responseBodyPath: String?
     public var cancelTokenId: UInt64?
     public var progressId: UInt64?
@@ -1237,13 +1245,21 @@ public struct VaneRequest: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(url: String, method: String, headers: [String: String], queryParams: [String: String], body: Data?, bodyFilePath: String?, responseBodyPath: String?, cancelTokenId: UInt64?, progressId: UInt64?, timeoutSeconds: UInt64?, followRedirects: Bool) {
+    public init(url: String, method: String, headers: [String: String], queryParams: [String: String], body: Data?, bodyFilePath: String?, 
+        /**
+         * A [`create_body_stream`] id: the caller pushes the body in chunks
+         * instead of materializing it. Mutually exclusive with `body` and
+         * `body_file_path`. A streamed body is one-shot — see the streamed-body
+         * rules on retry, redirects and transport fallback in
+         * `docs/upload-streaming-design.md`.
+         */bodyStreamId: UInt64? = nil, responseBodyPath: String?, cancelTokenId: UInt64?, progressId: UInt64?, timeoutSeconds: UInt64?, followRedirects: Bool) {
         self.url = url
         self.method = method
         self.headers = headers
         self.queryParams = queryParams
         self.body = body
         self.bodyFilePath = bodyFilePath
+        self.bodyStreamId = bodyStreamId
         self.responseBodyPath = responseBodyPath
         self.cancelTokenId = cancelTokenId
         self.progressId = progressId
@@ -1273,6 +1289,7 @@ public struct FfiConverterTypeVaneRequest: FfiConverterRustBuffer {
                 queryParams: FfiConverterDictionaryStringString.read(from: &buf), 
                 body: FfiConverterOptionData.read(from: &buf), 
                 bodyFilePath: FfiConverterOptionString.read(from: &buf), 
+                bodyStreamId: FfiConverterOptionUInt64.read(from: &buf), 
                 responseBodyPath: FfiConverterOptionString.read(from: &buf), 
                 cancelTokenId: FfiConverterOptionUInt64.read(from: &buf), 
                 progressId: FfiConverterOptionUInt64.read(from: &buf), 
@@ -1288,6 +1305,7 @@ public struct FfiConverterTypeVaneRequest: FfiConverterRustBuffer {
         FfiConverterDictionaryStringString.write(value.queryParams, into: &buf)
         FfiConverterOptionData.write(value.body, into: &buf)
         FfiConverterOptionString.write(value.bodyFilePath, into: &buf)
+        FfiConverterOptionUInt64.write(value.bodyStreamId, into: &buf)
         FfiConverterOptionString.write(value.responseBodyPath, into: &buf)
         FfiConverterOptionUInt64.write(value.cancelTokenId, into: &buf)
         FfiConverterOptionUInt64.write(value.progressId, into: &buf)
