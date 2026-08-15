@@ -72,23 +72,31 @@ private let vaneFFIQueue = DispatchQueue(
     attributes: .concurrent
 )
 
+/// Bridges one blocking core call on `vaneFFIQueue` back into async Swift.
+/// `resume(with: Result(catching:))` resumes exactly once on every path.
+/// A started core call runs to completion; cancel via `VaneCancelToken`.
+@available(iOS 13.0, *)
+private func vaneBlockingFFI<T: Sendable>(
+    _ work: @escaping @Sendable () throws -> T
+) async throws -> T {
+    return try await withCheckedThrowingContinuation { continuation in
+        vaneFFIQueue.async {
+            continuation.resume(with: Result(catching: work))
+        }
+    }
+}
+
 extension VaneClient {
 
     // MARK: - Async/Await Support
 
-    /// Bridges a blocking core call on `vaneFFIQueue` back into async Swift.
-    /// `resume(with: Result(catching:))` resumes exactly once on every path.
-    /// Cancellation is unchanged from the previous `Task.detached` bridge: a
-    /// started core call runs to completion; cancel via `VaneCancelToken`.
+    /// See `vaneBlockingFFI` — kept as the call-site spelling every request
+    /// method in this extension already uses.
     @available(iOS 13.0, *)
     private func runBlockingFFI<T: Sendable>(
         _ work: @escaping @Sendable () throws -> T
     ) async throws -> T {
-        return try await withCheckedThrowingContinuation { continuation in
-            vaneFFIQueue.async {
-                continuation.resume(with: Result(catching: work))
-            }
-        }
+        return try await vaneBlockingFFI(work)
     }
 
     @available(iOS 13.0, *)
@@ -135,6 +143,139 @@ extension VaneClient {
         // helper's signature.
         try? await runBlockingFFI { self.warmup(url: url) }
     }
+
+    /// Like `execute(_:)`, but resumes as soon as the final response's
+    /// headers are in, with the body left to stream; see
+    /// `VaneStreamingResponse`.
+    ///
+    /// Everything up to the headers behaves exactly like `execute(_:)`: the
+    /// same redirect chain, retry policy, HTTP/3-to-TCP fallback, cookies,
+    /// pins and deadline. Differences, all deliberate:
+    ///
+    /// - `VaneRequest.responseBodyPath` is refused by the core: the stream
+    ///   replaces the file escape hatch.
+    /// - Progress callbacks are meaningless here: the chunks themselves are
+    ///   the download progress.
+    /// - `VaneRequest.cancelTokenId` composes: cancelling that token aborts
+    ///   the header phase, or fails the body stream mid-flight. Cancelling
+    ///   the consuming task cancels it too. When the request carries no
+    ///   token, the wrapper runs one internally so cancelling a parked read
+    ///   stays prompt.
+    @available(iOS 13.0, *)
+    public func executeStreaming(_ request: VaneRequest) async throws -> VaneStreamingResponse {
+        var effectiveRequest = request
+        let ownedToken: VaneCancelToken? = request.cancelTokenId == nil ? VaneCancelToken() : nil
+        if let ownedToken {
+            effectiveRequest.cancelTokenId = ownedToken.id
+        }
+        // On a header-phase failure the owned token deallocates here and its
+        // deinit releases the native registry entry.
+        let (stream, head) = try await runBlockingFFI {
+            let stream = try self.executeStreamingRequest(request: effectiveRequest)
+            return (stream, stream.head())
+        }
+        let cancelNative: @Sendable () -> Void
+        if let ownedToken {
+            // The closure keeps the owned token alive for the stream's life;
+            // its deinit frees the native entry when the body is released.
+            cancelNative = { ownedToken.cancel() }
+        } else {
+            // Non-nil by construction: no owned token means the caller set one.
+            let callerTokenId = request.cancelTokenId!
+            cancelNative = { cancelById(id: callerTokenId) }
+        }
+        return VaneStreamingResponse(
+            head: head,
+            body: vaneStreamingBody(stream: stream, cancelToken: cancelNative)
+        )
+    }
+}
+
+// MARK: - Streaming
+
+/// A response whose headers have arrived and whose body is still streaming.
+///
+/// `head` is the familiar `VaneResponse` — status, headers, final URL,
+/// cookies, negotiated protocol — with `VaneResponse.body` empty by contract:
+/// `body` delivers it instead.
+///
+/// `body` is demand-driven and meant for a single consumer: chunks are pulled
+/// off the native transport only as the consumer iterates, so a slow consumer
+/// stalls the sender through QUIC/TCP flow control instead of buffering
+/// without bound. Chunk boundaries carry no meaning. A failure after the
+/// headers throws from the iteration, not as a failed request. Cancelling the
+/// consuming task cancels the request's token first — that is what interrupts
+/// a pull parked in the FFI — then closes the native stream, discarding its
+/// connection; only a body iterated to the end returns the connection to the
+/// pool.
+///
+/// Always iterate (or cancel the iteration of) `body`: an abandoned,
+/// never-iterated body holds its connection until the stream object
+/// deallocates.
+@available(iOS 13.0, *)
+public struct VaneStreamingResponse {
+    public let head: VaneResponse
+    public let body: AsyncThrowingStream<Data, Error>
+
+    public init(head: VaneResponse, body: AsyncThrowingStream<Data, Error>) {
+        self.head = head
+        self.body = body
+    }
+}
+
+/// Bridges one native response stream into a demand-driven
+/// `AsyncThrowingStream`. The shape carries the invariants; refactor with
+/// care:
+///
+/// - **No read-ahead, by construction.** `init(unfolding:)` runs one closure
+///   call per consumer `next()`; there is no producer task and no buffer, so
+///   the core is never asked for bytes the consumer has not asked for — and a
+///   core that is not pulled does not read the socket, which stalls the
+///   sender through QUIC/TCP flow control. Replacing this with the
+///   continuation-based initializer plus a reading `Task` looks equivalent
+///   and is not, twice over: `yield` never suspends, so that shape buffers an
+///   unbounded run-ahead of the body, and its read loop parks a thread for
+///   the stream's whole life.
+/// - **Every blocking call stays off the cooperative pool.** Reads and closes
+///   hop to `vaneFFIQueue` (default QoS — see its doc for the p95 history).
+///   A GCD thread is parked only while one pull is in flight, not per live
+///   stream: N streams blocked in reads park N threads, the same budget N
+///   in-flight buffered requests already consume; streams idle between pulls
+///   park none.
+/// - **Token before close.** A pull parked in the FFI holds the native
+///   stream's lock, and `closeStream` waits on that lock; only cancelling the
+///   request's token makes a parked pull return. The cancellation handler
+///   fires the token the moment the consuming task is cancelled, and
+///   `closeStream` runs only after the pull has returned.
+@available(iOS 13.0, *)
+func vaneStreamingBody(
+    stream: any VaneResponseStreamProtocol,
+    cancelToken: @escaping @Sendable () -> Void
+) -> AsyncThrowingStream<Data, Error> {
+    return AsyncThrowingStream(unfolding: {
+        do {
+            let chunk = try await withTaskCancellationHandler {
+                try await vaneBlockingFFI { try stream.readChunk() }
+            } onCancel: {
+                cancelToken()
+            }
+            if let chunk {
+                return chunk
+            }
+            // EOF: the connection is already back in the pool and closeStream
+            // is an idempotent no-op — called for symmetry with the error
+            // path so the native stream is always left explicitly closed.
+            _ = try? await vaneBlockingFFI { stream.closeStream() }
+            return nil
+        } catch {
+            // Failure or cancellation: the read has returned, so this close
+            // cannot block behind it. After a failure the connection is
+            // already discarded; after a cancellation this is what discards
+            // it.
+            _ = try? await vaneBlockingFFI { stream.closeStream() }
+            throw error
+        }
+    })
 }
 
 // MARK: - Alamofire-style Interface
@@ -358,6 +499,24 @@ public class VaneSession {
             _ = builder.onDownloadProgress(onDownloadProgress)
         }
         return try await builder.execute()
+    }
+
+    /// Like `execute(_:)`, but resolves as soon as the final response's
+    /// headers are in, with the body left to stream; see
+    /// `VaneStreamingResponse`.
+    ///
+    /// Request interceptors run; response and error interceptors do NOT — an
+    /// interceptor written against a buffered `VaneResponse` cannot rewrite a
+    /// body that has not arrived. Validate status off the head, e.g.
+    /// `try response.head.validateStatus()`. The other deltas from
+    /// `execute(_:)` are documented on `VaneClient.executeStreaming(_:)`.
+    public func executeStreaming(_ request: VaneRequest) async throws -> VaneStreamingResponse {
+        var interceptedRequest = request
+        let requestInterceptors = requestInterceptors
+        for interceptor in requestInterceptors {
+            interceptedRequest = try await interceptor(interceptedRequest)
+        }
+        return try await client.executeStreaming(interceptedRequest)
     }
 
     public func execute(_ request: VaneRequest) async throws -> VaneResponse {

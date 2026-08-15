@@ -403,6 +403,190 @@ struct VaneSwiftTests {
         #expect(progress.download != nil)
     }
 
+    // MARK: - Streaming
+
+    /// `VaneResponseStreamProtocol` stand-in mirroring the core's contract:
+    /// `readChunk` holds the stream's lock while it blocks, `closeStream`
+    /// must wait for that lock, and only the cancel token makes a parked
+    /// read return.
+    final class FakeResponseStream: VaneResponseStreamProtocol, @unchecked Sendable {
+        /// Mirrors the core's stream mutex: held for the whole of a read.
+        private let streamLock = NSLock()
+        /// Signalled by the fake token; releases a parked read.
+        private let interrupted = DispatchSemaphore(value: 0)
+        /// Signalled when a read has entered its parked wait.
+        let readParked = DispatchSemaphore(value: 0)
+        private let stateLock = NSLock()
+        private var remaining: [Data]
+        private let failure: VaneError?
+        private let blockAfterChunks: Bool
+        private var recordedEvents: [String] = []
+        private var reads = 0
+
+        init(
+            chunks: [Data] = [],
+            failure: VaneError? = nil,
+            blockAfterChunks: Bool = false
+        ) {
+            self.remaining = chunks
+            self.failure = failure
+            self.blockAfterChunks = blockAfterChunks
+        }
+
+        func note(_ event: String) {
+            stateLock.lock()
+            recordedEvents.append(event)
+            stateLock.unlock()
+        }
+
+        var events: [String] {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return recordedEvents
+        }
+
+        var readsStarted: Int {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return reads
+        }
+
+        func interrupt() {
+            interrupted.signal()
+        }
+
+        func head() -> VaneResponse {
+            VaneResponse(
+                statusCode: 200,
+                headers: [:],
+                body: Data(),
+                isSuccess: true,
+                url: "https://example.com/stream"
+            )
+        }
+
+        func readChunk() throws -> Data? {
+            streamLock.lock()
+            defer { streamLock.unlock() }
+            stateLock.lock()
+            reads += 1
+            let next = remaining.isEmpty ? nil : remaining.removeFirst()
+            stateLock.unlock()
+            if let next {
+                return next
+            }
+            if let failure {
+                throw failure
+            }
+            if blockAfterChunks {
+                note("readParked")
+                readParked.signal()
+                guard interrupted.wait(timeout: .now() + 5) == .success else {
+                    note("parkExpired")
+                    throw VaneError.Generic("parked read was never interrupted — the wrapper lost the cancel token")
+                }
+                note("readReturnedAfterCancel")
+                throw VaneError.Cancelled("Request was cancelled")
+            }
+            return nil
+        }
+
+        func closeStream() {
+            // A close issued while a read is parked would sit here for the
+            // whole 5 s park and fail the promptness assertion.
+            streamLock.lock()
+            defer { streamLock.unlock() }
+            note("close")
+        }
+    }
+
+    /// Design risk #3: cancelling a consumer whose read is parked in the FFI
+    /// must fire the cancel token first (the only thing that releases the
+    /// read), close strictly afterwards, and return promptly.
+    @Test
+    func cancellingABlockedStreamingReadFiresTheTokenThenClosesPromptly() async throws {
+        let fake = FakeResponseStream(blockAfterChunks: true)
+        let body = vaneStreamingBody(
+            stream: fake,
+            cancelToken: {
+                fake.note("cancelToken")
+                fake.interrupt()
+            }
+        )
+        let consumer = Task {
+            for try await _ in body {}
+        }
+        #expect(
+            fake.readParked.wait(timeout: .now() + 2) == .success,
+            "the pull never reached its blocking read"
+        )
+        let started = Date()
+        consumer.cancel()
+        let outcome = await consumer.result
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(
+            elapsed < 1.5,
+            "cancel took \(elapsed)s — the token did not interrupt the parked read"
+        )
+        guard case .failure = outcome else {
+            Issue.record("a stream cancelled mid-read must not end as a clean EOF")
+            return
+        }
+        #expect(
+            fake.events == ["readParked", "cancelToken", "readReturnedAfterCancel", "close"],
+            "teardown order was \(fake.events)"
+        )
+    }
+
+    /// The demand-driven shape must never read ahead of the consumer: an
+    /// eager producer task (the shape this wrapper deliberately avoids)
+    /// would race through every chunk while the consumer sleeps.
+    @Test
+    func aSlowConsumerNeverLetsTheStreamReadAhead() async throws {
+        let fake = FakeResponseStream(chunks: (0..<5).map { Data([UInt8($0)]) })
+        let body = vaneStreamingBody(stream: fake, cancelToken: {})
+        var consumed = 0
+        for try await chunk in body {
+            consumed += 1
+            #expect(chunk == Data([UInt8(consumed - 1)]))
+            // Give an eager producer every chance to run ahead before looking.
+            try await Task.sleep(nanoseconds: 50_000_000)
+            let started = fake.readsStarted
+            #expect(
+                started == consumed,
+                "\(started) reads started with only \(consumed) consumed — backpressure lost"
+            )
+        }
+        #expect(consumed == 5)
+        #expect(fake.events == ["close"], "EOF must close the stream, and nothing else")
+    }
+
+    /// A failure after the headers belongs to the stream: every chunk
+    /// delivered before it stays delivered, the error surfaces from the
+    /// iteration, and the stream still gets closed.
+    @Test
+    func aMidStreamFailureSurfacesOnTheStreamAndStillCloses() async throws {
+        let fake = FakeResponseStream(
+            chunks: [Data([1])],
+            failure: VaneError.Transport("connection lost mid-body")
+        )
+        let body = vaneStreamingBody(stream: fake, cancelToken: { fake.note("cancelToken") })
+        var received = 0
+        do {
+            for try await _ in body {
+                received += 1
+            }
+            Issue.record("expected the mid-stream transport failure to throw")
+        } catch let error as VaneError {
+            guard case .Transport = error else {
+                Issue.record("expected VaneError.Transport, got \(error)")
+                return
+            }
+        }
+        #expect(received == 1, "the chunk delivered before the failure must not be lost")
+        #expect(fake.events == ["close"], "a failed stream must still be closed, without a token cancel")
+    }
+
     @Test
     func cancelTokenLifecycleIsIdempotentAgainstTheNativeRegistry() {
         let first = VaneCancelToken()

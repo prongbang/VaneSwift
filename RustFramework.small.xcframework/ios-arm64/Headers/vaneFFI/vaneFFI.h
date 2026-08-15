@@ -273,6 +273,11 @@ RustBuffer uniffi_vane_fn_method_vaneclient_delete_request(uint64_t ptr, RustBuf
 RustBuffer uniffi_vane_fn_method_vaneclient_execute_request(uint64_t ptr, RustBuffer request, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_EXECUTE_STREAMING_REQUEST
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_EXECUTE_STREAMING_REQUEST
+uint64_t uniffi_vane_fn_method_vaneclient_execute_streaming_request(uint64_t ptr, RustBuffer request, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_GET_REQUEST
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_GET_REQUEST
 RustBuffer uniffi_vane_fn_method_vaneclient_get_request(uint64_t ptr, RustBuffer url, RustCallStatus *_Nonnull out_status
@@ -301,6 +306,31 @@ void uniffi_vane_fn_method_vaneclient_set_certificate_pins(uint64_t ptr, RustBuf
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_WARMUP
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_WARMUP
 void uniffi_vane_fn_method_vaneclient_warmup(uint64_t ptr, RustBuffer url, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_CLONE_VANERESPONSESTREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_CLONE_VANERESPONSESTREAM
+uint64_t uniffi_vane_fn_clone_vaneresponsestream(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FREE_VANERESPONSESTREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FREE_VANERESPONSESTREAM
+void uniffi_vane_fn_free_vaneresponsestream(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANERESPONSESTREAM_CLOSE_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANERESPONSESTREAM_CLOSE_STREAM
+void uniffi_vane_fn_method_vaneresponsestream_close_stream(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANERESPONSESTREAM_HEAD
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANERESPONSESTREAM_HEAD
+RustBuffer uniffi_vane_fn_method_vaneresponsestream_head(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANERESPONSESTREAM_READ_CHUNK
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANERESPONSESTREAM_READ_CHUNK
+RustBuffer uniffi_vane_fn_method_vaneresponsestream_read_chunk(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CANCEL_BY_ID
@@ -689,6 +719,12 @@ uint16_t uniffi_vane_checksum_method_vaneclient_execute_request(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_EXECUTE_STREAMING_REQUEST
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_EXECUTE_STREAMING_REQUEST
+uint16_t uniffi_vane_checksum_method_vaneclient_execute_streaming_request(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_GET_REQUEST
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_GET_REQUEST
 uint16_t uniffi_vane_checksum_method_vaneclient_get_request(void
@@ -722,6 +758,24 @@ uint16_t uniffi_vane_checksum_method_vaneclient_set_certificate_pins(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_WARMUP
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_WARMUP
 uint16_t uniffi_vane_checksum_method_vaneclient_warmup(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANERESPONSESTREAM_CLOSE_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANERESPONSESTREAM_CLOSE_STREAM
+uint16_t uniffi_vane_checksum_method_vaneresponsestream_close_stream(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANERESPONSESTREAM_HEAD
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANERESPONSESTREAM_HEAD
+uint16_t uniffi_vane_checksum_method_vaneresponsestream_head(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANERESPONSESTREAM_READ_CHUNK
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANERESPONSESTREAM_READ_CHUNK
+uint16_t uniffi_vane_checksum_method_vaneresponsestream_read_chunk(void
     
 );
 #endif

@@ -487,7 +487,11 @@ fileprivate struct FfiConverterString: FfiConverter {
             return String()
         }
         let bytes = UnsafeBufferPointer<UInt8>(start: value.data!, count: Int(value.len))
-        return String(bytes: bytes, encoding: String.Encoding.utf8)!
+        // Use Swift's native UTF-8 decoder; `String(bytes:encoding:.utf8)` goes
+        // through Foundation's NSString and silently strips a leading U+FEFF BOM.
+        // Invalid UTF-8 substitutes U+FFFD instead of trapping (unreachable
+        // given Rust's `String` invariant).
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     public static func lower(_ value: String) -> RustBuffer {
@@ -503,7 +507,8 @@ fileprivate struct FfiConverterString: FfiConverter {
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
+        // See `lift` above for why we avoid Foundation's NSString-backed decoder here.
+        return String(decoding: try readBytes(&buf, count: Int(len)), as: UTF8.self)
     }
 
     public static func write(_ value: String, into buf: inout [UInt8]) {
@@ -543,6 +548,14 @@ public protocol VaneClientProtocol: AnyObject, Sendable {
     func deleteRequest(url: String) throws  -> VaneResponse
     
     func executeRequest(request: VaneRequest) throws  -> VaneResponse
+    
+    /**
+     * [`Self::execute_streaming`] for the bindings: same contract, with the
+     * stream behind an `Arc` because UniFFI hands objects out by reference.
+     * `Arc<Self>` receiver on purpose — the stream keeps the client alive so
+     * a drained body can return its connection to the pool.
+     */
+    func executeStreamingRequest(request: VaneRequest) throws  -> VaneResponseStream
     
     func getRequest(url: String) throws  -> VaneResponse
     
@@ -664,6 +677,21 @@ open func deleteRequest(url: String)throws  -> VaneResponse  {
 open func executeRequest(request: VaneRequest)throws  -> VaneResponse  {
     return try  FfiConverterTypeVaneResponse_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
     uniffi_vane_fn_method_vaneclient_execute_request(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeVaneRequest_lower(request),$0
+    )
+})
+}
+    
+    /**
+     * [`Self::execute_streaming`] for the bindings: same contract, with the
+     * stream behind an `Arc` because UniFFI hands objects out by reference.
+     * `Arc<Self>` receiver on purpose — the stream keeps the client alive so
+     * a drained body can return its connection to the pool.
+     */
+open func executeStreamingRequest(request: VaneRequest)throws  -> VaneResponseStream  {
+    return try  FfiConverterTypeVaneResponseStream_lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneclient_execute_streaming_request(
             self.uniffiCloneHandle(),
         FfiConverterTypeVaneRequest_lower(request),$0
     )
@@ -794,6 +822,205 @@ public func FfiConverterTypeVaneClient_lift(_ handle: UInt64) throws -> VaneClie
 #endif
 public func FfiConverterTypeVaneClient_lower(_ value: VaneClient) -> UInt64 {
     return FfiConverterTypeVaneClient.lower(value)
+}
+
+
+
+
+
+
+/**
+ * An HTTP response whose headers have arrived and whose body is read
+ * incrementally by the caller.
+ *
+ * Pull-based on purpose: the core never reads ahead of the caller, so a slow
+ * consumer stalls the peer through QUIC flow control / the TCP receive
+ * window instead of buffering without bound. `read_chunk` blocks until body
+ * bytes arrive, the body ends (`None`), or the stream fails — a transport
+ * error after the headers were delivered surfaces here, not as a failed
+ * request. Abandoning the stream (`close`, or dropping it) discards the
+ * underlying connection; only a stream read to its end returns the
+ * connection to the pool.
+ */
+public protocol VaneResponseStreamProtocol: AnyObject, Sendable {
+    
+    /**
+     * Releases the stream without draining it — [`Self::close`] under the
+     * name the bindings see. It cannot export as `close`: UniFFI's Kotlin
+     * objects already implement `AutoCloseable.close()` (free the handle),
+     * and a same-signature exported `close()` fails to compile there.
+     */
+    func closeStream() 
+    
+    /**
+     * The response head: status, headers, final URL, cookies, protocol.
+     * `body` is empty by contract — the stream itself delivers it.
+     */
+    func head()  -> VaneResponse
+    
+    /**
+     * Blocks until the next body chunk arrives and returns it; `Ok(None)`
+     * once the body is complete. Chunk boundaries carry no meaning.
+     *
+     * A pull that sees no data for roughly the request's timeout fails with
+     * [`VaneError::Timeout`]. After any error the stream is dead: the
+     * connection has been discarded and every later pull repeats the same
+     * error. After `close`, pulls return `Ok(None)`.
+     */
+    func readChunk() throws  -> Data?
+    
+}
+/**
+ * An HTTP response whose headers have arrived and whose body is read
+ * incrementally by the caller.
+ *
+ * Pull-based on purpose: the core never reads ahead of the caller, so a slow
+ * consumer stalls the peer through QUIC flow control / the TCP receive
+ * window instead of buffering without bound. `read_chunk` blocks until body
+ * bytes arrive, the body ends (`None`), or the stream fails — a transport
+ * error after the headers were delivered surfaces here, not as a failed
+ * request. Abandoning the stream (`close`, or dropping it) discards the
+ * underlying connection; only a stream read to its end returns the
+ * connection to the pool.
+ */
+open class VaneResponseStream: VaneResponseStreamProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_vane_fn_clone_vaneresponsestream(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_vane_fn_free_vaneresponsestream(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Releases the stream without draining it — [`Self::close`] under the
+     * name the bindings see. It cannot export as `close`: UniFFI's Kotlin
+     * objects already implement `AutoCloseable.close()` (free the handle),
+     * and a same-signature exported `close()` fails to compile there.
+     */
+open func closeStream()  {try! rustCall() {
+    uniffi_vane_fn_method_vaneresponsestream_close_stream(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+    /**
+     * The response head: status, headers, final URL, cookies, protocol.
+     * `body` is empty by contract — the stream itself delivers it.
+     */
+open func head() -> VaneResponse  {
+    return try!  FfiConverterTypeVaneResponse_lift(try! rustCall() {
+    uniffi_vane_fn_method_vaneresponsestream_head(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Blocks until the next body chunk arrives and returns it; `Ok(None)`
+     * once the body is complete. Chunk boundaries carry no meaning.
+     *
+     * A pull that sees no data for roughly the request's timeout fails with
+     * [`VaneError::Timeout`]. After any error the stream is dead: the
+     * connection has been discarded and every later pull repeats the same
+     * error. After `close`, pulls return `Ok(None)`.
+     */
+open func readChunk()throws  -> Data?  {
+    return try  FfiConverterOptionData.lift(try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_method_vaneresponsestream_read_chunk(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneResponseStream: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = VaneResponseStream
+
+    public static func lift(_ handle: UInt64) throws -> VaneResponseStream {
+        return VaneResponseStream(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: VaneResponseStream) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneResponseStream {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: VaneResponseStream, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneResponseStream_lift(_ handle: UInt64) throws -> VaneResponseStream {
+    return try FfiConverterTypeVaneResponseStream.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneResponseStream_lower(_ value: VaneResponseStream) -> UInt64 {
+    return FfiConverterTypeVaneResponseStream.lower(value)
 }
 
 
@@ -1872,6 +2099,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_vane_checksum_method_vaneclient_execute_request() != 51840) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_vane_checksum_method_vaneclient_execute_streaming_request() != 17751) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vane_checksum_method_vaneclient_get_request() != 12326) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1888,6 +2118,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_method_vaneclient_warmup() != 42407) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vaneresponsestream_close_stream() != 16563) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vaneresponsestream_head() != 54130) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vaneresponsestream_read_chunk() != 20515) {
         return InitializationResult.apiChecksumMismatch
     }
 
