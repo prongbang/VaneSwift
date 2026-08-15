@@ -2011,6 +2011,19 @@ public func cancelById(id: UInt64)  {try! rustCall() {
     )
 }
 }
+/**
+ * Creates a caller-pushed request body stream and returns its id, to be set
+ * as [`VaneRequest::body_stream_id`]. `content_length` of `Some(n)` sends
+ * `content-length: n` and enforces exactly `n` bytes; `None` sends no length
+ * (chunked on HTTP/1.1). One stream feeds exactly one request.
+ */
+public func createBodyStream(contentLength: UInt64?) -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_vane_fn_func_create_body_stream(
+        FfiConverterOptionUInt64.lower(contentLength),$0
+    )
+})
+}
 public func createCancelToken() -> UInt64  {
     return try!  FfiConverterUInt64.lift(try! rustCall() {
     uniffi_vane_fn_func_create_cancel_token($0
@@ -2035,6 +2048,28 @@ public func createVaneClient(config: VaneClientConfig)throws  -> VaneClient  {
         FfiConverterTypeVaneClientConfig_lower(config),$0
     )
 })
+}
+/**
+ * Marks the body complete. With a declared length, finishing at any other
+ * byte count is an `InvalidRequest` that also fails the in-flight request.
+ */
+public func finishBodyStream(id: UInt64)throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_func_finish_body_stream(
+        FfiConverterUInt64.lower(id),$0
+    )
+}
+}
+/**
+ * Frees the id; aborts the request if the stream was not finished (and
+ * releases a writer parked inside [`write_body_stream_chunk`] — this is the
+ * abort path a wrapper must reach from somewhere that is not itself
+ * parked). Safe on unknown or already-freed ids.
+ */
+public func freeBodyStream(id: UInt64)  {try! rustCall() {
+    uniffi_vane_fn_func_free_body_stream(
+        FfiConverterUInt64.lower(id),$0
+    )
+}
 }
 public func freeCancelToken(id: UInt64)  {try! rustCall() {
     uniffi_vane_fn_func_free_cancel_token(
@@ -2062,6 +2097,22 @@ public func responseBodyUtf8(resp: VaneResponse)throws  -> String  {
     )
 })
 }
+/**
+ * Appends one chunk. Blocks while the transport's send window and the
+ * stream's internal buffer are full — this blocking is the backpressure, so
+ * bindings run it off any thread that must stay responsive and interrupt a
+ * parked call with [`free_body_stream`] (or the request's cancel token),
+ * never by waiting it out. Fails once the stream or its request is dead;
+ * the error is the same one the request fails with, so either side of the
+ * caller learns the outcome.
+ */
+public func writeBodyStreamChunk(id: UInt64, chunk: Data)throws   {try rustCallWithError(FfiConverterTypeVaneError_lift) {
+    uniffi_vane_fn_func_write_body_stream_chunk(
+        FfiConverterUInt64.lower(id),
+        FfiConverterData.lower(chunk),$0
+    )
+}
+}
 
 private enum InitializationResult {
     case ok
@@ -2081,6 +2132,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_vane_checksum_func_cancel_by_id() != 63899) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_vane_checksum_func_create_body_stream() != 37766) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vane_checksum_func_create_cancel_token() != 2029) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2093,6 +2147,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_vane_checksum_func_create_vane_client() != 57471) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_vane_checksum_func_finish_body_stream() != 6990) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_func_free_body_stream() != 41564) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vane_checksum_func_free_cancel_token() != 20515) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2103,6 +2163,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_func_response_body_utf8() != 21709) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_func_write_body_stream_chunk() != 63692) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_method_vaneclient_add_certificate_pin() != 4284) {

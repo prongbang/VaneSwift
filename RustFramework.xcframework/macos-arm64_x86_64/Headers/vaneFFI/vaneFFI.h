@@ -338,6 +338,11 @@ RustBuffer uniffi_vane_fn_method_vaneresponsestream_read_chunk(uint64_t ptr, Rus
 void uniffi_vane_fn_func_cancel_by_id(uint64_t id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_BODY_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_BODY_STREAM
+uint64_t uniffi_vane_fn_func_create_body_stream(RustBuffer content_length, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_CANCEL_TOKEN
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_CREATE_CANCEL_TOKEN
 uint64_t uniffi_vane_fn_func_create_cancel_token(RustCallStatus *_Nonnull out_status
@@ -361,6 +366,16 @@ uint64_t uniffi_vane_fn_func_create_progress(RustCallStatus *_Nonnull out_status
 uint64_t uniffi_vane_fn_func_create_vane_client(RustBuffer config, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FINISH_BODY_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FINISH_BODY_STREAM
+void uniffi_vane_fn_func_finish_body_stream(uint64_t id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_BODY_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_BODY_STREAM
+void uniffi_vane_fn_func_free_body_stream(uint64_t id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_CANCEL_TOKEN
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_FREE_CANCEL_TOKEN
 void uniffi_vane_fn_func_free_cancel_token(uint64_t id, RustCallStatus *_Nonnull out_status
@@ -379,6 +394,11 @@ RustBuffer uniffi_vane_fn_func_progress_snapshot_by_id(uint64_t id, RustCallStat
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_RESPONSE_BODY_UTF8
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_RESPONSE_BODY_UTF8
 RustBuffer uniffi_vane_fn_func_response_body_utf8(RustBuffer resp, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_WRITE_BODY_STREAM_CHUNK
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FUNC_WRITE_BODY_STREAM_CHUNK
+void uniffi_vane_fn_func_write_body_stream_chunk(uint64_t id, RustBuffer chunk, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_VANE_RUSTBUFFER_ALLOC
@@ -647,6 +667,12 @@ uint16_t uniffi_vane_checksum_func_cancel_by_id(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_BODY_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_BODY_STREAM
+uint16_t uniffi_vane_checksum_func_create_body_stream(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_CANCEL_TOKEN
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_CREATE_CANCEL_TOKEN
 uint16_t uniffi_vane_checksum_func_create_cancel_token(void
@@ -671,6 +697,18 @@ uint16_t uniffi_vane_checksum_func_create_vane_client(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FINISH_BODY_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FINISH_BODY_STREAM
+uint16_t uniffi_vane_checksum_func_finish_body_stream(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_BODY_STREAM
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_BODY_STREAM
+uint16_t uniffi_vane_checksum_func_free_body_stream(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_CANCEL_TOKEN
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_FREE_CANCEL_TOKEN
 uint16_t uniffi_vane_checksum_func_free_cancel_token(void
@@ -692,6 +730,12 @@ uint16_t uniffi_vane_checksum_func_progress_snapshot_by_id(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_RESPONSE_BODY_UTF8
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_RESPONSE_BODY_UTF8
 uint16_t uniffi_vane_checksum_func_response_body_utf8(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_WRITE_BODY_STREAM_CHUNK
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_FUNC_WRITE_BODY_STREAM_CHUNK
+uint16_t uniffi_vane_checksum_func_write_body_stream_chunk(void
     
 );
 #endif

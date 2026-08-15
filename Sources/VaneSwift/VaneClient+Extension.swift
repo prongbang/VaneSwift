@@ -278,6 +278,206 @@ func vaneStreamingBody(
     })
 }
 
+// MARK: - Upload (request-body) streaming
+
+/// Latches the first failure of the caller's own body sequence, so the
+/// wrapper can rethrow it in place of the `Cancelled` its abort induces on
+/// the request.
+private final class VaneUploadSourceFailure: @unchecked Sendable {
+    private let lock = NSLock()
+    private var failure: Error?
+
+    func store(_ error: Error) {
+        lock.lock()
+        if failure == nil { failure = error }
+        lock.unlock()
+    }
+
+    func take() -> Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return failure
+    }
+}
+
+/// One blocking body-stream call on `vaneFFIQueue` that a cancelled task can
+/// always interrupt promptly — the write-side twin of the download wrapper's
+/// cancellation-wrapped pull, with `free` in the cancel token's role: only
+/// freeing the stream makes a parked write return, and the handler fires
+/// from the canceller's context, never from the parked thread.
+@available(iOS 13.0, *)
+private func vaneUploadFFICall(
+    free: @escaping @Sendable () -> Void,
+    _ call: @escaping @Sendable () throws -> Void
+) async throws {
+    try await withTaskCancellationHandler {
+        try await vaneBlockingFFI { try call() }
+    } onCancel: {
+        free()
+    }
+}
+
+/// Bridges one caller-supplied body sequence into a native body stream
+/// around `execute` — `vaneStreamingBody`'s mirror image. The shape carries
+/// the invariants; refactor with care:
+///
+/// - **No write-ahead, by construction.** There is no pumping task and no
+///   buffer: the writer iterates `source` and makes one blocking write per
+///   element, so the sequence is not asked for its next element until the
+///   previous chunk's write has returned — and past the core's 256 KiB
+///   buffer that write only returns as the transport drains, which stalls
+///   the source through QUIC/TCP flow control. Pumping `source` into an
+///   `AsyncThrowingStream` continuation first looks equivalent and is not:
+///   `yield` never suspends, so that shape buffers the whole body.
+/// - **Free from a never-parked path.** A writer parked inside the blocking
+///   write is released only by `free` (or the core's own request-release
+///   latch); anything that waits for the parked write before freeing
+///   deadlocks. Cancellation reaches `free` through `onCancel` handlers —
+///   the execute side's for a caller cancel, `vaneUploadFFICall`'s for the
+///   writer task — and the writer's final `free()` covers every other
+///   terminal. After a clean finish that free only drops the id (queued
+///   bytes still drain), so it is unconditional.
+/// - **The execute result is authoritative.** A write the core fails
+///   carries the same error the request fails with, so the writer stops
+///   quietly instead of re-reporting it; only a failure of `source` itself
+///   is recorded, and it replaces the `Cancelled` its abort induces.
+@available(iOS 13.0, *)
+func vaneStreamedUpload<Source: AsyncSequence, T: Sendable>(
+    source: Source,
+    write: @escaping @Sendable (Data) throws -> Void,
+    finish: @escaping @Sendable () throws -> Void,
+    free: @escaping @Sendable () -> Void,
+    execute: @escaping () async throws -> T
+) async throws -> T where Source.Element == Data {
+    let sourceFailure = VaneUploadSourceFailure()
+    let writer = Task {
+        do {
+            for try await chunk in source {
+                try await vaneUploadFFICall(free: free) { try write(chunk) }
+            }
+            try await vaneUploadFFICall(free: free) { try finish() }
+        } catch is CancellationError {
+            // Cancelled between calls; a call that was parked has already
+            // been freed by its own onCancel handler.
+        } catch is VaneError {
+            // The request failed (or refused the stream); the execute result
+            // tells that story — reporting it here too would double-report.
+        } catch {
+            sourceFailure.store(error)
+        }
+        // Every writer terminal frees: after a clean finish this only drops
+        // the id, before one it is the abort that fails the request. Never
+        // parked here — a call still in flight keeps this line from running.
+        free()
+    }
+    do {
+        let result = try await withTaskCancellationHandler {
+            try await execute()
+        } onCancel: {
+            // The caller cancelled the upload. The writer is an unstructured
+            // task (cancellation does not propagate to it), and it may be
+            // parked inside a blocking write right now — this free, from the
+            // canceller's never-parked context, is what releases that write
+            // and aborts the request at its next body pull.
+            free()
+        }
+        // The request settled, whatever the source is doing: a source idle
+        // between chunks (or one that never ends) must not keep the writer
+        // alive. A writer parked in a write is released by the free this
+        // cancellation reaches. The await is bounded for the same reason.
+        writer.cancel()
+        _ = await writer.value
+        return result
+    } catch {
+        writer.cancel()
+        _ = await writer.value
+        // The source's own error is the story, not the synthetic Cancelled
+        // its abort induced on the request. A caller cancellation keeps its
+        // own error.
+        if !(error is CancellationError), let failure = sourceFailure.take() {
+            throw failure
+        }
+        throw error
+    }
+}
+
+/// Production glue shared by `VaneClient.execute(_:body:contentLength:)` and
+/// the request builder: creates the native stream, stamps its id on the
+/// request, and binds the four generated calls into `vaneStreamedUpload`.
+@available(iOS 13.0, *)
+func vaneRunStreamedUpload<Source: AsyncSequence>(
+    source: Source,
+    contentLength: UInt64?,
+    request: VaneRequest,
+    executor: @escaping (VaneRequest) async throws -> VaneResponse
+) async throws -> VaneResponse where Source.Element == Data {
+    let id = createBodyStream(contentLength: contentLength)
+    var streamedRequest = request
+    streamedRequest.bodyStreamId = id
+    let finalRequest = streamedRequest
+    return try await vaneStreamedUpload(
+        source: source,
+        write: { chunk in try writeBodyStreamChunk(id: id, chunk: chunk) },
+        finish: { try finishBodyStream(id: id) },
+        free: { freeBodyStream(id: id) },
+        execute: { try await executor(finalRequest) }
+    )
+}
+
+extension VaneClient {
+    /// Like `execute(_:)`, but the request body is streamed from `body`
+    /// instead of being held in memory: chunks are pushed into the core one
+    /// blocking write at a time (each on `vaneFFIQueue`, never the
+    /// cooperative pool), and when the transport's send window and the
+    /// core's 256 KiB buffer are full that write parks — so `body`'s
+    /// iteration is what stalls, and Swift-side buffering is bounded at the
+    /// single chunk in flight. Chunk boundaries carry no meaning.
+    ///
+    /// `contentLength` of a non-nil `n` sends `Content-Length: n` and
+    /// enforces exactly `n` bytes (finishing at any other count fails the
+    /// request); nil streams without a declared length (chunked on
+    /// HTTP/1.1, plain frames on h2/HTTP/3).
+    ///
+    /// A streamed body is one-shot, which buys these documented differences
+    /// from `execute(_:)`:
+    /// - **No retry.** The request runs exactly one attempt per transport,
+    ///   whatever the retry configuration says.
+    /// - **Body-keeping redirects are refused** (307/308 on any method,
+    ///   301/302 on GET): the 3xx comes back as the response, carrying
+    ///   `vane-redirect-refused: streamed-body`. Hops that drop the body
+    ///   (303, 301/302 on other methods) are followed as a bodyless GET.
+    /// - **HTTP/3-to-TCP fallback happens only before the first consumed
+    ///   body byte** — after that the HTTP/3 error is reported instead.
+    /// - **The whole upload must fit the request timeout.** On TCP the body
+    ///   send and the response headers share one deadline (reqwest wraps
+    ///   both in a single timeout), and HTTP/3 runs the same shared
+    ///   deadline — callers moving large bodies set the request timeout
+    ///   accordingly.
+    ///
+    /// A failure of `body` itself aborts the request and is rethrown here
+    /// in place of the `Cancelled` that abort induces. A write the core
+    /// fails is not double-reported: the error thrown by this call is
+    /// authoritative. Cancelling the calling task frees the native stream
+    /// from a never-parked path (releasing a parked write) and thereby
+    /// aborts the request at its next body pull; attach a `VaneCancelToken`
+    /// as well for a prompt abort in every request phase. One stream feeds
+    /// exactly one request; each call creates its own.
+    @available(iOS 13.0, *)
+    public func execute<Body: AsyncSequence>(
+        _ request: VaneRequest,
+        body: Body,
+        contentLength: UInt64? = nil
+    ) async throws -> VaneResponse where Body.Element == Data {
+        return try await vaneRunStreamedUpload(
+            source: body,
+            contentLength: contentLength,
+            request: request
+        ) { streamed in
+            try await self.execute(streamed)
+        }
+    }
+}
+
 // MARK: - Alamofire-style Interface
 
 @available(iOS 13.0, *)
@@ -571,6 +771,8 @@ public class VaneRequestBuilder {
     private var request: VaneRequest
     private var uploadProgress: VaneProgressCallback?
     private var downloadProgress: VaneProgressCallback?
+    private var bodyStreamSource: AsyncThrowingStream<Data, Error>?
+    private var bodyStreamContentLength: UInt64?
 
     internal init(
         url: String,
@@ -618,12 +820,37 @@ public class VaneRequestBuilder {
     public func body(_ body: Data) -> VaneRequestBuilder {
         request.body = body
         request.bodyFilePath = nil
+        bodyStreamSource = nil
         return self
     }
 
     public func bodyFile(_ path: String) -> VaneRequestBuilder {
         request.bodyFilePath = path
         request.body = nil
+        bodyStreamSource = nil
+        return self
+    }
+
+    /// Streams the request body from `source` instead of holding it in
+    /// memory. The body shapes are mutually exclusive: this clears `body`
+    /// and `bodyFile`, and either of those clears this. Ceilings and the
+    /// abort contract are documented on the client-level overload,
+    /// `VaneClient.execute(_:body:contentLength:)` — in one line: no retry,
+    /// body-keeping redirects come back refused, HTTP/3-to-TCP fallback
+    /// only before the first consumed byte, and the whole upload must fit
+    /// the request timeout.
+    public func bodyStream<S: AsyncSequence>(
+        _ source: S,
+        contentLength: UInt64? = nil
+    ) -> VaneRequestBuilder where S.Element == Data {
+        var iterator = source.makeAsyncIterator()
+        // Erased one pull per consumer demand (`unfolding`) — an erasure
+        // that pumped `source` through a continuation would buffer the whole
+        // body, the exact failure the streamed path exists to prevent.
+        bodyStreamSource = AsyncThrowingStream(unfolding: { try await iterator.next() })
+        bodyStreamContentLength = contentLength
+        request.body = nil
+        request.bodyFilePath = nil
         return self
     }
 
@@ -743,7 +970,17 @@ public class VaneRequestBuilder {
         }
 
         do {
-            let response = try await executor(executableRequest)
+            let response: VaneResponse
+            if let source = bodyStreamSource {
+                response = try await vaneRunStreamedUpload(
+                    source: source,
+                    contentLength: bodyStreamContentLength,
+                    request: executableRequest,
+                    executor: executor
+                )
+            } else {
+                response = try await executor(executableRequest)
+            }
             finishProgress(progressId, progressTask)
             return response
         } catch {
