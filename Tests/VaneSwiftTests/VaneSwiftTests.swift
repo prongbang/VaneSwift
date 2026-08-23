@@ -54,6 +54,26 @@ struct VaneSwiftTests {
         var download: (received: UInt64, total: UInt64)?
     }
 
+    /// Locked (producedBefore, sent) pairs recorded at every source pull of
+    /// the live backpressure test — appended in the source, asserted only
+    /// after the response settles.
+    final class UploadPullRecordBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var records: [(producedBefore: UInt64, sent: UInt64)] = []
+
+        var value: [(producedBefore: UInt64, sent: UInt64)] {
+            lock.lock()
+            defer { lock.unlock() }
+            return records
+        }
+
+        func append(producedBefore: UInt64, sent: UInt64) {
+            lock.lock()
+            defer { lock.unlock() }
+            records.append((producedBefore, sent))
+        }
+    }
+
     private func runBenchmark(
         summaryName: String,
         labelPrefix: String,
@@ -678,6 +698,93 @@ struct VaneSwiftTests {
 
         #expect(first.isSuccess)
         #expect(second.isSuccess)
+    }
+
+    /// Live upload backpressure through the wrapper: the demand-driven pull
+    /// loop -> the real core's blocking `writeBodyStreamChunk` -> a real
+    /// transport draining the bytes. This pins vaneRunStreamedUpload and
+    /// below; the builder erasure is pinned only by its inline comment.
+    ///
+    /// The fake-based suite cannot kill a wrapper that buffers the whole
+    /// source — the fake acks writes instantly, so lockstep and
+    /// buffer-everything look identical at wrapper speed. Against a live
+    /// endpoint a buffering wrapper completes all 64 pulls at memory speed,
+    /// before the QUIC/TLS handshake can carry a single body byte, so most
+    /// recorded pulls blow the 512 KiB bound. A correct wrapper passes at
+    /// ANY network speed by code order, not by racing: pull k happens only
+    /// after write k-1 returned, that write's admission required queued
+    /// < 256 KiB, and the core stores uploadSent within two in-flight
+    /// chunks of the drain on both transports — so producedBefore can
+    /// never exceed uploadSent + 256 KiB + 4 chunks.
+    ///
+    /// A FRESH, UN-POOLED client per test is a requirement, not a
+    /// convenience: the kill argument's handshake-gap step depends on it —
+    /// a pooled connection could start draining body bytes before a
+    /// buffering mutant finished its pulls, muddying the violation.
+    @available(macOS 13.0, iOS 16.0, *)
+    @Test(.timeLimit(.minutes(2)))
+    func streamedUploadBackpressureHoldsTheLiveSourceToTheTransportDrain() async throws {
+        guard let baseURL = integrationBaseURL() else { return }
+        let chunkSize: UInt64 = 64 * 1024
+        let chunkCount: UInt64 = 64  // 4 MiB total — 16x the core's 256 KiB buffer
+        let allowance: UInt64 = 512 * 1024  // 256 KiB buffer + 4 chunks of margin
+        let client = try createVaneClient(
+            config: VaneConfigurationBuilder()
+                .baseURL(baseURL)
+                .timeout(60)
+                .build()
+        )
+        // A caller-owned progress id: the drain gauge is the core's own
+        // uploadSent counter read FRESH at every pull — never the 100 ms
+        // progress poller, whose staleness at WAN throughput would
+        // spuriously fail a correct wrapper.
+        let progressId = createProgress()
+        defer { freeProgress(id: progressId) }
+        let records = UploadPullRecordBox()
+        let pulls = VaneUploadCounterBox()
+        // Demand-driven counting source — one pull per completed write, the
+        // same `unfolding` shape the production erasure uses. Records are
+        // only appended here and asserted after the response settles, so a
+        // violated bound can never wedge the upload itself.
+        let source = AsyncStream<Data>(unfolding: {
+            let pull = UInt64(pulls.increment())  // 1-based
+            guard pull <= chunkCount else { return nil }
+            records.append(
+                producedBefore: (pull - 1) * chunkSize,
+                sent: progressSnapshotById(id: progressId).uploadSent
+            )
+            return Data(repeating: UInt8(ascii: "a"), count: Int(chunkSize))
+        })
+        let request = VaneRequest(
+            url: "/post",
+            method: "POST",
+            headers: [:],
+            queryParams: [:],
+            body: nil,
+            bodyFilePath: nil,
+            responseBodyPath: nil,
+            cancelTokenId: nil,
+            progressId: progressId,
+            timeoutSeconds: nil,
+            followRedirects: true
+        )
+        let response = try await client.execute(
+            request, body: source, contentLength: chunkSize * chunkCount)
+        // Transport-agnostic on purpose: pinning httpVersion == http3 here
+        // would add an unrelated flake to a bound that holds identically on
+        // either transport.
+        #expect(response.statusCode == 200)
+        #expect(response.isSuccess)
+        let recorded = records.value
+        // Pulled chunk-by-chunk to completion — an early-failing or
+        // short-circuited upload cannot vacuously pass the bound below.
+        #expect(recorded.count == Int(chunkCount), "recorded \(recorded.count) pulls")
+        for (index, record) in recorded.enumerated() {
+            #expect(
+                record.producedBefore <= record.sent + allowance,
+                "pull \(index) ran \(record.producedBefore - record.sent) bytes ahead of the transport (allowance \(allowance))"
+            )
+        }
     }
 
     @Test

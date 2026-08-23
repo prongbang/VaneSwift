@@ -372,6 +372,105 @@ struct VaneUploadStreamingTests {
             try finishBodyStream(id: streamId)
         }
     }
+
+    /// The seam the fakes above and the Rust suite both miss: the request
+    /// SETTLES while a write is genuinely parked inside the real
+    /// `writeBodyStreamChunk` — blocked in the core's condvar at its full
+    /// 256 KiB buffer — and the only route to that parked thread is
+    /// `vaneUploadFFICall`'s `onCancel: { free() }`
+    /// (VaneClient+Extension.swift L315-317), reached via the
+    /// `writer.cancel()` that follows a settled execute. The real
+    /// `freeBodyStream(id:)` must latch Cancelled, wake the parked native
+    /// write across threads, and drop the id from the registry. The fake
+    /// cancel test pins the glue's ordering; the clean-path glue test above
+    /// never has a write parked at teardown; this is the settle-path abort
+    /// against the REAL registry. The time limit records the failure at 60 s
+    /// and attributes it to this test; the runner process still wedges on
+    /// `await writer.value` (nothing can unpark it), so a killed mutant shows
+    /// up in CI as this recorded issue plus a job timeout.
+    @available(macOS 13.0, iOS 16.0, *)
+    @Test(.timeLimit(.minutes(1)))
+    func settlingTheRequestWhileAWriteIsParkedFreesTheRealRegistryStream() async throws {
+        let captured = VaneUploadCapturedRequestBox()
+        let teardownStart = VaneUploadDateBox()
+        let response = try await vaneRunStreamedUpload(
+            // An infinite source of 64 KiB chunks: writes are sequential,
+            // so writes 1–4 fill the 256 KiB buffer exactly and write 5
+            // sees the buffer full and parks. Nothing drains the queue —
+            // the request below is never dialed — so the park is
+            // deterministic, not a race.
+            source: AsyncStream<Data>(unfolding: {
+                captured.pulls.increment()
+                return Data(count: 64 * 1024)
+            }),
+            contentLength: nil,
+            request: VaneRequest(
+                url: "https://upload.invalid/never-sent",
+                method: "POST",
+                headers: [:],
+                queryParams: [:],
+                body: nil,
+                bodyFilePath: nil,
+                responseBodyPath: nil,
+                cancelTokenId: nil,
+                progressId: nil,
+                timeoutSeconds: nil,
+                followRedirects: true
+            )
+        ) { streamed in
+            captured.request = streamed
+            // Wait until pull 5 has been handed to the writer (writes 1–4
+            // admitted, chunk 5's write dispatched), then give that write a
+            // beat to actually park in the condvar before settling.
+            var waited = 0.0
+            while captured.pulls.value < 5 && waited < 5.0 {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                waited += 0.02
+            }
+            if captured.pulls.value < 5 {
+                Issue.record("the writer stalled at \(captured.pulls.value) pulls — never reached the parking write")
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            // Returning IS the settle: `vaneStreamedUpload` then runs
+            // `writer.cancel()` against the genuinely parked write.
+            teardownStart.store(Date())
+            return VaneResponse(
+                statusCode: 200,
+                headers: [:],
+                body: Data(),
+                isSuccess: true,
+                url: streamed.url
+            )
+        }
+        // The settle-path result is authoritative even with a write parked
+        // mid-flight: the induced Cancelled on the released write is
+        // swallowed by the writer's `catch is VaneError`.
+        #expect(response.isSuccess)
+        // Pure teardown time — cancel → free → condvar wake → writer exit;
+        // the settle sleep already elapsed inside the executor.
+        let teardown = Date().timeIntervalSince(try #require(teardownStart.value))
+        #expect(
+            teardown < 2,
+            "teardown took \(teardown)s — free never woke the parked write"
+        )
+        // Exactly 4 admitted + 1 parked: the writer never pulls a 6th
+        // chunk (parked until the free releases it, then it exits through
+        // the caught VaneError).
+        #expect(captured.pulls.value == 5, "the source was pulled \(captured.pulls.value) times")
+        // The registry probe, tighter than the clean-path test's: the
+        // freed id must be UNKNOWN, not merely cancelled — a free that woke
+        // the write but left the id registered would throw Cancelled here
+        // and slip past a loose `throws: VaneError.self`.
+        let streamId = try #require(captured.request?.bodyStreamId)
+        let error = #expect(throws: VaneError.self) {
+            try finishBodyStream(id: streamId)
+        }
+        guard case let .InvalidRequest(message) = error else {
+            Issue.record("expected InvalidRequest for a freed id, got \(String(describing: error))")
+            return
+        }
+        #expect(message.contains("Unknown body stream id"))
+    }
 }
 
 /// Tiny locked counter for the demand-driven sources above.
@@ -397,4 +496,23 @@ final class VaneUploadCounterBox: @unchecked Sendable {
 final class VaneUploadCapturedRequestBox: @unchecked Sendable {
     var request: VaneRequest?
     let pulls = VaneUploadCounterBox()
+}
+
+/// Tiny locked timestamp for the settle-path teardown measurement above —
+/// stored inside the executor, read after the upload call returns.
+final class VaneUploadDateBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date: Date?
+
+    var value: Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return date
+    }
+
+    func store(_ newValue: Date) {
+        lock.lock()
+        defer { lock.unlock() }
+        date = newValue
+    }
 }
