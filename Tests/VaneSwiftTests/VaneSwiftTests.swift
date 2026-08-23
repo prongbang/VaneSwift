@@ -129,6 +129,34 @@ struct VaneSwiftTests {
     }
 
     @Test
+    func headerDerivedViewsAreFirstWinsAndOrdered() {
+        let response = VaneResponse(
+            statusCode: 200,
+            headers: [
+                VaneHeader(name: "x-dup", value: "first"),
+                VaneHeader(name: "set-cookie", value: "a=1"),
+                VaneHeader(name: "x-dup", value: "second"),
+                VaneHeader(name: "content-type", value: "text/plain"),
+                VaneHeader(name: "set-cookie", value: "b=2"),
+            ],
+            body: Data(),
+            bodyFilePath: nil,
+            isSuccess: true,
+            url: "https://example.com/"
+        )
+
+        // The list is the source of truth: arrival order and duplicates intact.
+        #expect(response.headers.map(\.value) == ["first", "a=1", "second", "text/plain", "b=2"])
+        // The map view is first-wins, set-cookie included like any other name.
+        #expect(response.headerMap["x-dup"] == "first")
+        #expect(response.headerMap["content-type"] == "text/plain")
+        #expect(response.headerMap["set-cookie"] == "a=1")
+        // The cookie view keeps every occurrence, in arrival order.
+        #expect(response.setCookie == ["a=1", "b=2"])
+        #expect(response.remoteIp == nil)
+    }
+
+    @Test
     func get() async throws {
         guard let baseURL = integrationBaseURL() else { return }
         let session = try VaneSession()
@@ -210,7 +238,7 @@ struct VaneSwiftTests {
             responseInterceptors: [
                 { response in
                     var response = response
-                    response.headers["x-intercepted"] = "true"
+                    response.headers.append(VaneHeader(name: "x-intercepted", value: "true"))
                     return response
                 }
             ],
@@ -232,7 +260,7 @@ struct VaneSwiftTests {
             .execute()
 
         #expect(response.statusCode == 299)
-        #expect(response.headers["x-intercepted"] == "true")
+        #expect(response.headerMap["x-intercepted"] == "true")
         #expect(String(data: response.body, encoding: .utf8) == "synthetic")
     }
 
@@ -334,14 +362,14 @@ struct VaneSwiftTests {
             }
             .addResponseInterceptor { response in
                 var response = response
-                response.headers["x-response"] = "1"
+                response.headers.append(VaneHeader(name: "x-response", value: "1"))
                 return response
             }
 
         let response = try await session.get("http://example.com/late")
 
         #expect(captured.request?.headers["x-late"] == "1")
-        #expect(response.headers["x-response"] == "1")
+        #expect(response.headerMap["x-response"] == "1")
 
         session.clearInterceptors()
         captured.request = nil

@@ -41,15 +41,32 @@ private let vaneJSONEncoder = JSONEncoder()
 private let vaneJSONDecoder = JSONDecoder()
 
 public extension VaneResponse {
+    /// Convenience for synthetic responses (interceptors, tests). The map is
+    /// folded into the ordered pair list with lowercased names, sorted by name
+    /// for determinism — a dictionary has no order of its own to preserve.
     init(statusCode: UInt16, headers: [String: String], body: Data, isSuccess: Bool, url: String) {
         self.init(
             statusCode: statusCode,
-            headers: headers,
+            headers: headers
+                .map { VaneHeader(name: $0.key.lowercased(), value: $0.value) }
+                .sorted { $0.name < $1.name },
             body: body,
             bodyFilePath: nil,
             isSuccess: isSuccess,
             url: url
         )
+    }
+
+    /// First-wins map view of `headers` — the first occurrence of a name wins,
+    /// matching the core's redirect rule for `location` (RFC 9110 §10.2.2).
+    /// Consumers that need every duplicate read the ordered list itself.
+    var headerMap: [String: String] {
+        Dictionary(headers.map { ($0.name, $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Every `set-cookie` value the server sent, in arrival order.
+    var setCookie: [String] {
+        headers.filter { $0.name == "set-cookie" }.map(\.value)
     }
 }
 

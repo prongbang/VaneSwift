@@ -1324,6 +1324,63 @@ public func FfiConverterTypeVaneClientConfig_lower(_ value: VaneClientConfig) ->
 }
 
 
+/**
+ * One response header occurrence: an ordered `(name, value)` pair.
+ */
+public struct VaneHeader: Equatable, Hashable {
+    public var name: String
+    public var value: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, value: String) {
+        self.name = name
+        self.value = value
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension VaneHeader: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneHeader: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneHeader {
+        return
+            try VaneHeader(
+                name: FfiConverterString.read(from: &buf), 
+                value: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VaneHeader, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneHeader_lift(_ buf: RustBuffer) throws -> VaneHeader {
+    return try FfiConverterTypeVaneHeader.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneHeader_lower(_ value: VaneHeader) -> RustBuffer {
+    return FfiConverterTypeVaneHeader.lower(value)
+}
+
+
 public struct VaneProgressSnapshot: Equatable, Hashable {
     public var uploadSent: UInt64
     public var uploadTotal: UInt64
@@ -1501,72 +1558,74 @@ public func FfiConverterTypeVaneRequest_lower(_ value: VaneRequest) -> RustBuffe
 public struct VaneResponse: Equatable, Hashable {
     public var statusCode: UInt16
     /**
-     * One entry per header name, keyed lowercase. A name the server repeated
-     * carries its values comma-joined in wire order (`"a, b"`, RFC 9110
-     * §5.2) — identically on both transports. Two exceptions: `set-cookie`
-     * (see [`Self::set_cookie`]) and `location`, which is single-valued by
-     * RFC 9110 §10.2.2 and keeps its first occurrence — the one the redirect
-     * gate acts on — rather than joining into a non-URL.
+     * Ordered `(name, value)` pairs, names lowercased, duplicates preserved,
+     * `set-cookie` inline in arrival position — including cookies the jar
+     * refused (a `Domain` that is a public suffix, or an IP literal), because
+     * this reports what the server sent. On HTTP/3 this is wire order; on TCP
+     * it is reqwest `HeaderMap` order (duplicates of a name grouped). The
+     * redirect gate acts on the FIRST `location` occurrence (RFC 9110
+     * §10.2.2); derived map views are first-wins and live binding-side.
+     *
+     * Redirects: the final response only. Intermediate hops still reach the
+     * cookie jar as before.
      */
-    public var headers: [String: String]
+    public var headers: [VaneHeader]
     public var body: Data
     public var bodyFilePath: String?
     public var isSuccess: Bool
     public var url: String
     /**
-     * Raw `Set-Cookie` values from the final response, in wire order.
-     *
-     * Unfiltered: a cookie the jar refused (a `Domain` that is a public
-     * suffix, or an IP literal) still appears here, because this reports what
-     * the server sent. Never folded into `headers` — a `HashMap` cannot hold
-     * repeats and RFC 6265 forbids comma-joining `Set-Cookie` (an `Expires`
-     * value contains a comma, so the join is unsplittable).
-     *
-     * Redirects: the final response only. Intermediate hops still reach the
-     * cookie jar as before.
-     */
-    public var setCookie: [String]
-    /**
      * Protocol that served the final response. `None` when no exchange
      * completed, or when the transport could not say.
      */
     public var httpVersion: VaneHttpVersion?
+    /**
+     * IP literal of the socket peer of the connection that produced the
+     * final hop's response — `"203.0.113.7"`, `"2001:db8::1"`: no port, no
+     * brackets. Direct HTTP/3: the resolved origin. Via a MASQUE (H3) or
+     * CONNECT (TCP) proxy: the proxy — the actual socket peer, which is all
+     * reqwest can ever report, and the H3 side matches it rather than
+     * inventing a per-transport difference. `None` when the transport could
+     * not say.
+     */
+    public var remoteIp: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(statusCode: UInt16, 
         /**
-         * One entry per header name, keyed lowercase. A name the server repeated
-         * carries its values comma-joined in wire order (`"a, b"`, RFC 9110
-         * §5.2) — identically on both transports. Two exceptions: `set-cookie`
-         * (see [`Self::set_cookie`]) and `location`, which is single-valued by
-         * RFC 9110 §10.2.2 and keeps its first occurrence — the one the redirect
-         * gate acts on — rather than joining into a non-URL.
-         */headers: [String: String], body: Data, bodyFilePath: String?, isSuccess: Bool, url: String, 
-        /**
-         * Raw `Set-Cookie` values from the final response, in wire order.
-         *
-         * Unfiltered: a cookie the jar refused (a `Domain` that is a public
-         * suffix, or an IP literal) still appears here, because this reports what
-         * the server sent. Never folded into `headers` — a `HashMap` cannot hold
-         * repeats and RFC 6265 forbids comma-joining `Set-Cookie` (an `Expires`
-         * value contains a comma, so the join is unsplittable).
+         * Ordered `(name, value)` pairs, names lowercased, duplicates preserved,
+         * `set-cookie` inline in arrival position — including cookies the jar
+         * refused (a `Domain` that is a public suffix, or an IP literal), because
+         * this reports what the server sent. On HTTP/3 this is wire order; on TCP
+         * it is reqwest `HeaderMap` order (duplicates of a name grouped). The
+         * redirect gate acts on the FIRST `location` occurrence (RFC 9110
+         * §10.2.2); derived map views are first-wins and live binding-side.
          *
          * Redirects: the final response only. Intermediate hops still reach the
          * cookie jar as before.
-         */setCookie: [String] = [], 
+         */headers: [VaneHeader], body: Data, bodyFilePath: String?, isSuccess: Bool, url: String, 
         /**
          * Protocol that served the final response. `None` when no exchange
          * completed, or when the transport could not say.
-         */httpVersion: VaneHttpVersion? = nil) {
+         */httpVersion: VaneHttpVersion? = nil, 
+        /**
+         * IP literal of the socket peer of the connection that produced the
+         * final hop's response — `"203.0.113.7"`, `"2001:db8::1"`: no port, no
+         * brackets. Direct HTTP/3: the resolved origin. Via a MASQUE (H3) or
+         * CONNECT (TCP) proxy: the proxy — the actual socket peer, which is all
+         * reqwest can ever report, and the H3 side matches it rather than
+         * inventing a per-transport difference. `None` when the transport could
+         * not say.
+         */remoteIp: String? = nil) {
         self.statusCode = statusCode
         self.headers = headers
         self.body = body
         self.bodyFilePath = bodyFilePath
         self.isSuccess = isSuccess
         self.url = url
-        self.setCookie = setCookie
         self.httpVersion = httpVersion
+        self.remoteIp = remoteIp
     }
 
     
@@ -1586,25 +1645,25 @@ public struct FfiConverterTypeVaneResponse: FfiConverterRustBuffer {
         return
             try VaneResponse(
                 statusCode: FfiConverterUInt16.read(from: &buf), 
-                headers: FfiConverterDictionaryStringString.read(from: &buf), 
+                headers: FfiConverterSequenceTypeVaneHeader.read(from: &buf), 
                 body: FfiConverterData.read(from: &buf), 
                 bodyFilePath: FfiConverterOptionString.read(from: &buf), 
                 isSuccess: FfiConverterBool.read(from: &buf), 
                 url: FfiConverterString.read(from: &buf), 
-                setCookie: FfiConverterSequenceString.read(from: &buf), 
-                httpVersion: FfiConverterOptionTypeVaneHttpVersion.read(from: &buf)
+                httpVersion: FfiConverterOptionTypeVaneHttpVersion.read(from: &buf), 
+                remoteIp: FfiConverterOptionString.read(from: &buf)
         )
     }
 
     public static func write(_ value: VaneResponse, into buf: inout [UInt8]) {
         FfiConverterUInt16.write(value.statusCode, into: &buf)
-        FfiConverterDictionaryStringString.write(value.headers, into: &buf)
+        FfiConverterSequenceTypeVaneHeader.write(value.headers, into: &buf)
         FfiConverterData.write(value.body, into: &buf)
         FfiConverterOptionString.write(value.bodyFilePath, into: &buf)
         FfiConverterBool.write(value.isSuccess, into: &buf)
         FfiConverterString.write(value.url, into: &buf)
-        FfiConverterSequenceString.write(value.setCookie, into: &buf)
         FfiConverterOptionTypeVaneHttpVersion.write(value.httpVersion, into: &buf)
+        FfiConverterOptionString.write(value.remoteIp, into: &buf)
     }
 }
 
@@ -2232,6 +2291,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeVaneHeader: FfiConverterRustBuffer {
+    typealias SwiftType = [VaneHeader]
+
+    public static func write(_ value: [VaneHeader], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeVaneHeader.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VaneHeader] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [VaneHeader]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeVaneHeader.read(from: &buf))
         }
         return seq
     }
