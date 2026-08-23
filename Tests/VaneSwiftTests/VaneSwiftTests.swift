@@ -247,6 +247,47 @@ struct VaneSwiftTests {
     }
 
     @Test
+    func configurationBuilderCarriesTheV5KnobsAndTheirDefaults() throws {
+        let defaults = createDefaultConfig()
+        #expect(defaults.maxRedirects == 10)
+        #expect(defaults.tlsMinVersion == nil)
+        #expect(defaults.tlsMaxVersion == nil)
+        #expect(defaults.customRootCertificates.isEmpty)
+        #expect(defaults.clientCertificate == nil)
+
+        let config = VaneConfigurationBuilder()
+            .maxRedirects(5)
+            .tlsMinVersion(.tls12)
+            .tlsMaxVersion(.tls13)
+            .customRootCertificates(["root-pem"])
+            .clientCertificate(certificatePem: "cert-pem", privateKeyPem: "key-pem")
+            .build()
+
+        #expect(config.maxRedirects == 5)
+        #expect(config.tlsMinVersion == .tls12)
+        #expect(config.tlsMaxVersion == .tls13)
+        #expect(config.customRootCertificates == ["root-pem"])
+        #expect(config.clientCertificate?.certificatePem == "cert-pem")
+        #expect(config.clientCertificate?.privateKeyPem == "key-pem")
+    }
+
+    @Test
+    func trustKnobsAreRefusedAsTypedInvalidRequestUntilBatch3WiresThem() {
+        let config = VaneConfigurationBuilder()
+            .customRootCertificates(["root-pem"])
+            .build()
+
+        do {
+            _ = try createVaneClient(config: config)
+            Issue.record("expected the customRootCertificates not-implemented guard to fire")
+        } catch let VaneError.InvalidRequest(message) {
+            #expect(message.contains("customRootCertificates is not implemented yet"))
+        } catch {
+            Issue.record("expected VaneError.InvalidRequest, got \(error)")
+        }
+    }
+
+    @Test
     func requestInterceptorFailuresProduceStableErrors() async throws {
         enum TestInterceptorError: Error {
             case blocked

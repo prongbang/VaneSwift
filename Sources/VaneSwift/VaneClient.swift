@@ -435,6 +435,22 @@ fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -1026,6 +1042,74 @@ public func FfiConverterTypeVaneResponseStream_lower(_ value: VaneResponseStream
 
 
 
+public struct VaneClientCertificate: Equatable, Hashable {
+    /**
+     * PEM, leaf first, optionally followed by intermediates (full chain).
+     */
+    public var certificatePem: String
+    /**
+     * PEM PKCS#8, SEC1, or PKCS#1 private key. Never logged, never echoed in
+     * errors, never printed by Debug.
+     */
+    public var privateKeyPem: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * PEM, leaf first, optionally followed by intermediates (full chain).
+         */certificatePem: String, 
+        /**
+         * PEM PKCS#8, SEC1, or PKCS#1 private key. Never logged, never echoed in
+         * errors, never printed by Debug.
+         */privateKeyPem: String) {
+        self.certificatePem = certificatePem
+        self.privateKeyPem = privateKeyPem
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension VaneClientCertificate: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneClientCertificate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneClientCertificate {
+        return
+            try VaneClientCertificate(
+                certificatePem: FfiConverterString.read(from: &buf), 
+                privateKeyPem: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VaneClientCertificate, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.certificatePem, into: &buf)
+        FfiConverterString.write(value.privateKeyPem, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneClientCertificate_lift(_ buf: RustBuffer) throws -> VaneClientCertificate {
+    return try FfiConverterTypeVaneClientCertificate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneClientCertificate_lower(_ value: VaneClientCertificate) -> RustBuffer {
+    return FfiConverterTypeVaneClientCertificate.lower(value)
+}
+
+
 public struct VaneClientConfig: Equatable, Hashable {
     public var baseUrl: String?
     public var defaultHeaders: [String: String]
@@ -1046,12 +1130,81 @@ public struct VaneClientConfig: Equatable, Hashable {
     public var followRedirects: Bool
     public var userAgent: String?
     public var protocolMode: VaneProtocolMode
+    /**
+     * With `proxy_authorization`, the ENTIRE proxy surface — deliberately.
+     * A per-scheme proxy union (rhttp's shape) is meaningless in an
+     * https-only client: with one possible request scheme, first-scheme-match
+     * is always the first entry, i.e. a single proxy URL. SOCKS stays out
+     * too — it would be TCP-only and silently dead on H3 (MASQUE has no
+     * SOCKS analogue). Revisit only if Vane ever accepts http:// URLs (the
+     * https-only rejections in `execute`/`tcp.rs` are the tripwire).
+     */
     public var proxyUrl: String?
     public var proxyAuthorization: String?
+    /**
+     * Redirect hop cap when `follow_redirects` is on. Shared by both
+     * transports: the hop cap is a security bound, not a transport detail.
+     * At most 64; 0 makes the first 3xx a hop-cap refusal.
+     */
+    public var maxRedirects: UInt32
+    /**
+     * Minimum TLS version on the TCP path; `None` = rustls default (1.2).
+     * HTTP/3 is TLS 1.3-always (RFC 9001), so on that path this only
+     * validates compatibility at construction.
+     */
+    public var tlsMinVersion: VaneTlsVersion?
+    /**
+     * Maximum TLS version on the TCP path; `None` = rustls default (1.3).
+     * `Tls12` is rejected at construction with an HTTP/3-capable
+     * `protocol_mode`: QUIC mandates TLS 1.3.
+     */
+    public var tlsMaxVersion: VaneTlsVersion?
+    /**
+     * PEM certificates ADDED to platform trust on both stacks (extend-only;
+     * there is no replace mode and no verification-off switch). Each entry
+     * may hold one certificate or a whole bundle.
+     */
+    public var customRootCertificates: [String]
+    /**
+     * Client certificate (mTLS) presented to the origin on both stacks.
+     */
+    public var clientCertificate: VaneClientCertificate?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(baseUrl: String?, defaultHeaders: [String: String], dnsOverrides: [String: String], certificatePins: [String: [String]], cookiesEnabled: Bool, cookiePersistencePath: String?, connectionPoolEnabled: Bool, maxIdleConnections: UInt64, connectionIdleTimeoutSeconds: UInt64, retryMaxAttempts: UInt64, retryInitialDelayMillis: UInt64, retryMaxDelayMillis: UInt64, retryUnsafeMethods: Bool, maxRequestBodyBytes: UInt64, maxResponseBodyBytes: UInt64, timeoutSeconds: UInt64?, followRedirects: Bool, userAgent: String?, protocolMode: VaneProtocolMode, proxyUrl: String?, proxyAuthorization: String?) {
+    public init(baseUrl: String?, defaultHeaders: [String: String], dnsOverrides: [String: String], certificatePins: [String: [String]], cookiesEnabled: Bool, cookiePersistencePath: String?, connectionPoolEnabled: Bool, maxIdleConnections: UInt64, connectionIdleTimeoutSeconds: UInt64, retryMaxAttempts: UInt64, retryInitialDelayMillis: UInt64, retryMaxDelayMillis: UInt64, retryUnsafeMethods: Bool, maxRequestBodyBytes: UInt64, maxResponseBodyBytes: UInt64, timeoutSeconds: UInt64?, followRedirects: Bool, userAgent: String?, protocolMode: VaneProtocolMode, 
+        /**
+         * With `proxy_authorization`, the ENTIRE proxy surface — deliberately.
+         * A per-scheme proxy union (rhttp's shape) is meaningless in an
+         * https-only client: with one possible request scheme, first-scheme-match
+         * is always the first entry, i.e. a single proxy URL. SOCKS stays out
+         * too — it would be TCP-only and silently dead on H3 (MASQUE has no
+         * SOCKS analogue). Revisit only if Vane ever accepts http:// URLs (the
+         * https-only rejections in `execute`/`tcp.rs` are the tripwire).
+         */proxyUrl: String?, proxyAuthorization: String?, 
+        /**
+         * Redirect hop cap when `follow_redirects` is on. Shared by both
+         * transports: the hop cap is a security bound, not a transport detail.
+         * At most 64; 0 makes the first 3xx a hop-cap refusal.
+         */maxRedirects: UInt32 = UInt32(10), 
+        /**
+         * Minimum TLS version on the TCP path; `None` = rustls default (1.2).
+         * HTTP/3 is TLS 1.3-always (RFC 9001), so on that path this only
+         * validates compatibility at construction.
+         */tlsMinVersion: VaneTlsVersion? = nil, 
+        /**
+         * Maximum TLS version on the TCP path; `None` = rustls default (1.3).
+         * `Tls12` is rejected at construction with an HTTP/3-capable
+         * `protocol_mode`: QUIC mandates TLS 1.3.
+         */tlsMaxVersion: VaneTlsVersion? = nil, 
+        /**
+         * PEM certificates ADDED to platform trust on both stacks (extend-only;
+         * there is no replace mode and no verification-off switch). Each entry
+         * may hold one certificate or a whole bundle.
+         */customRootCertificates: [String] = [], 
+        /**
+         * Client certificate (mTLS) presented to the origin on both stacks.
+         */clientCertificate: VaneClientCertificate? = nil) {
         self.baseUrl = baseUrl
         self.defaultHeaders = defaultHeaders
         self.dnsOverrides = dnsOverrides
@@ -1073,6 +1226,11 @@ public struct VaneClientConfig: Equatable, Hashable {
         self.protocolMode = protocolMode
         self.proxyUrl = proxyUrl
         self.proxyAuthorization = proxyAuthorization
+        self.maxRedirects = maxRedirects
+        self.tlsMinVersion = tlsMinVersion
+        self.tlsMaxVersion = tlsMaxVersion
+        self.customRootCertificates = customRootCertificates
+        self.clientCertificate = clientCertificate
     }
 
     
@@ -1111,7 +1269,12 @@ public struct FfiConverterTypeVaneClientConfig: FfiConverterRustBuffer {
                 userAgent: FfiConverterOptionString.read(from: &buf), 
                 protocolMode: FfiConverterTypeVaneProtocolMode.read(from: &buf), 
                 proxyUrl: FfiConverterOptionString.read(from: &buf), 
-                proxyAuthorization: FfiConverterOptionString.read(from: &buf)
+                proxyAuthorization: FfiConverterOptionString.read(from: &buf), 
+                maxRedirects: FfiConverterUInt32.read(from: &buf), 
+                tlsMinVersion: FfiConverterOptionTypeVaneTlsVersion.read(from: &buf), 
+                tlsMaxVersion: FfiConverterOptionTypeVaneTlsVersion.read(from: &buf), 
+                customRootCertificates: FfiConverterSequenceString.read(from: &buf), 
+                clientCertificate: FfiConverterOptionTypeVaneClientCertificate.read(from: &buf)
         )
     }
 
@@ -1137,6 +1300,11 @@ public struct FfiConverterTypeVaneClientConfig: FfiConverterRustBuffer {
         FfiConverterTypeVaneProtocolMode.write(value.protocolMode, into: &buf)
         FfiConverterOptionString.write(value.proxyUrl, into: &buf)
         FfiConverterOptionString.write(value.proxyAuthorization, into: &buf)
+        FfiConverterUInt32.write(value.maxRedirects, into: &buf)
+        FfiConverterOptionTypeVaneTlsVersion.write(value.tlsMinVersion, into: &buf)
+        FfiConverterOptionTypeVaneTlsVersion.write(value.tlsMaxVersion, into: &buf)
+        FfiConverterSequenceString.write(value.customRootCertificates, into: &buf)
+        FfiConverterOptionTypeVaneClientCertificate.write(value.clientCertificate, into: &buf)
     }
 }
 
@@ -1833,6 +2001,73 @@ public func FfiConverterTypeVaneProtocolMode_lower(_ value: VaneProtocolMode) ->
 }
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum VaneTlsVersion: Equatable, Hashable {
+    
+    case tls12
+    case tls13
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension VaneTlsVersion: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneTlsVersion: FfiConverterRustBuffer {
+    typealias SwiftType = VaneTlsVersion
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneTlsVersion {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .tls12
+        
+        case 2: return .tls13
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: VaneTlsVersion, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .tls12:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .tls13:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneTlsVersion_lift(_ buf: RustBuffer) throws -> VaneTlsVersion {
+    return try FfiConverterTypeVaneTlsVersion.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneTlsVersion_lower(_ value: VaneTlsVersion) -> RustBuffer {
+    return FfiConverterTypeVaneTlsVersion.lower(value)
+}
+
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -1908,6 +2143,30 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeVaneClientCertificate: FfiConverterRustBuffer {
+    typealias SwiftType = VaneClientCertificate?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVaneClientCertificate.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVaneClientCertificate.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeVaneHttpVersion: FfiConverterRustBuffer {
     typealias SwiftType = VaneHttpVersion?
 
@@ -1924,6 +2183,30 @@ fileprivate struct FfiConverterOptionTypeVaneHttpVersion: FfiConverterRustBuffer
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeVaneHttpVersion.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeVaneTlsVersion: FfiConverterRustBuffer {
+    typealias SwiftType = VaneTlsVersion?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVaneTlsVersion.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVaneTlsVersion.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

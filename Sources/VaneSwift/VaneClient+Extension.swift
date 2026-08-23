@@ -1205,6 +1205,34 @@ public class VaneConfigurationBuilder {
         return self
     }
 
+    public func maxRedirects(_ value: UInt32) -> VaneConfigurationBuilder {
+        config.maxRedirects = value
+        return self
+    }
+
+    public func tlsMinVersion(_ value: VaneTlsVersion) -> VaneConfigurationBuilder {
+        config.tlsMinVersion = value
+        return self
+    }
+
+    public func tlsMaxVersion(_ value: VaneTlsVersion) -> VaneConfigurationBuilder {
+        config.tlsMaxVersion = value
+        return self
+    }
+
+    public func customRootCertificates(_ pems: [String]) -> VaneConfigurationBuilder {
+        config.customRootCertificates = pems
+        return self
+    }
+
+    public func clientCertificate(certificatePem: String, privateKeyPem: String) -> VaneConfigurationBuilder {
+        config.clientCertificate = VaneClientCertificate(
+            certificatePem: certificatePem,
+            privateKeyPem: privateKeyPem
+        )
+        return self
+    }
+
     public func build() -> VaneClientConfig {
         return config
     }
