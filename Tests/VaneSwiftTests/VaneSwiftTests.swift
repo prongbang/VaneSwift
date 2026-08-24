@@ -300,16 +300,40 @@ struct VaneSwiftTests {
     }
 
     @Test
-    func trustKnobsAreRefusedAsTypedInvalidRequestUntilBatch3WiresThem() {
-        let config = VaneConfigurationBuilder()
-            .customRootCertificates(["root-pem"])
-            .build()
+    func trustKnobsAreAcceptedAndInvalidPemStaysATypedInvalidRequest() throws {
+        // Batch 3: a valid PEM custom root constructs a client — the knob is
+        // wired, not guarded. Fixture is a public self-signed test CA
+        // certificate (no key anywhere near it).
+        let caPem = """
+            -----BEGIN CERTIFICATE-----
+            MIIBnDCCAUOgAwIBAgIUIMNxULKB2t+PJt3Si8Bkf2I15zgwCgYIKoZIzj0EAwIw
+            IzEhMB8GA1UEAwwYVmFuZVN3aWZ0IEJhdGNoMyBUZXN0IENBMCAXDTI2MDgyMzE1
+            NTk1NloYDzIxMjYwNzMwMTU1OTU2WjAjMSEwHwYDVQQDDBhWYW5lU3dpZnQgQmF0
+            Y2gzIFRlc3QgQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQ2QdkNMU2tGzEb
+            V5XQh159rpHiA0lOvvvU3fiTFnA23/xDBiXB4bm2q2S0PWlIgvdnKMhPZMAX9ARB
+            JbN/S8Jto1MwUTAdBgNVHQ4EFgQUGe6sCA3yIWTITrr1+583xETMcdAwHwYDVR0j
+            BBgwFoAUGe6sCA3yIWTITrr1+583xETMcdAwDwYDVR0TAQH/BAUwAwEB/zAKBggq
+            hkjOPQQDAgNHADBEAiA8p+I2zyzGufnX1dIQQKzIt+V/LnLfBGdTBs/13BUu9gIg
+            MyRG3YiGvF0GzvFdPogFtkuDeDnSVcKES2u1cZtWXQI=
+            -----END CERTIFICATE-----
+            """
+        _ = try createVaneClient(
+            config: VaneConfigurationBuilder()
+                .customRootCertificates([caPem])
+                .build()
+        )
 
+        // Malformed PEM still fails loudly as typed InvalidRequest, naming
+        // only the offending index — never echoing the material.
+        let rejected = VaneConfigurationBuilder()
+            .customRootCertificates(["not a certificate"])
+            .build()
         do {
-            _ = try createVaneClient(config: config)
-            Issue.record("expected the customRootCertificates not-implemented guard to fire")
+            _ = try createVaneClient(config: rejected)
+            Issue.record("expected the customRootCertificates PEM validation to fire")
         } catch let VaneError.InvalidRequest(message) {
-            #expect(message.contains("customRootCertificates is not implemented yet"))
+            #expect(message.contains("customRootCertificates[0] is not valid PEM certificate data"))
+            #expect(!message.contains("not a certificate"))
         } catch {
             Issue.record("expected VaneError.InvalidRequest, got \(error)")
         }
