@@ -243,6 +243,22 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureRes
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_VANE_DNS_RESOLVER_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_VANE_DNS_RESOLVER_METHOD0
+typedef void (*UniffiCallbackInterfaceVaneDnsResolverMethod0)(uint64_t, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_VANE_DNS_RESOLVER
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_VANE_DNS_RESOLVER
+typedef struct UniffiVTableCallbackInterfaceVaneDnsResolver {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceVaneDnsResolverMethod0 _Nonnull resolve;
+} UniffiVTableCallbackInterfaceVaneDnsResolver;
+
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_CLONE_VANECLIENT
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_CLONE_VANECLIENT
 uint64_t uniffi_vane_fn_clone_vaneclient(uint64_t handle, RustCallStatus *_Nonnull out_status
@@ -303,9 +319,34 @@ RustBuffer uniffi_vane_fn_method_vaneclient_put_request(uint64_t ptr, RustBuffer
 void uniffi_vane_fn_method_vaneclient_set_certificate_pins(uint64_t ptr, RustBuffer host, RustBuffer pins, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_SET_DNS_RESOLVER
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_SET_DNS_RESOLVER
+void uniffi_vane_fn_method_vaneclient_set_dns_resolver(uint64_t ptr, RustBuffer resolver, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_WARMUP
 #define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANECLIENT_WARMUP
 void uniffi_vane_fn_method_vaneclient_warmup(uint64_t ptr, RustBuffer url, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_CLONE_VANEDNSRESOLVER
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_CLONE_VANEDNSRESOLVER
+uint64_t uniffi_vane_fn_clone_vanednsresolver(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_FREE_VANEDNSRESOLVER
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_FREE_VANEDNSRESOLVER
+void uniffi_vane_fn_free_vanednsresolver(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_INIT_CALLBACK_VTABLE_VANEDNSRESOLVER
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_INIT_CALLBACK_VTABLE_VANEDNSRESOLVER
+void uniffi_vane_fn_init_callback_vtable_vanednsresolver(const UniffiVTableCallbackInterfaceVaneDnsResolver* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANEDNSRESOLVER_RESOLVE
+#define UNIFFI_FFIDEF_UNIFFI_VANE_FN_METHOD_VANEDNSRESOLVER_RESOLVE
+RustBuffer uniffi_vane_fn_method_vanednsresolver_resolve(uint64_t ptr, RustBuffer host, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_FN_CLONE_VANERESPONSESTREAM
@@ -799,9 +840,21 @@ uint16_t uniffi_vane_checksum_method_vaneclient_set_certificate_pins(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_SET_DNS_RESOLVER
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_SET_DNS_RESOLVER
+uint16_t uniffi_vane_checksum_method_vaneclient_set_dns_resolver(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_WARMUP
 #define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANECLIENT_WARMUP
 uint16_t uniffi_vane_checksum_method_vaneclient_warmup(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANEDNSRESOLVER_RESOLVE
+#define UNIFFI_FFIDEF_UNIFFI_VANE_CHECKSUM_METHOD_VANEDNSRESOLVER_RESOLVE
+uint16_t uniffi_vane_checksum_method_vanednsresolver_resolve(void
     
 );
 #endif

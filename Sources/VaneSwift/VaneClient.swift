@@ -414,7 +414,13 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 
 
 // Public interface members begin here.
-
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+private let IDX_CALLBACK_FREE: Int32 = 0
+// Callback return codes
+private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
+private let UNIFFI_CALLBACK_ERROR: Int32 = 1
+private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -582,6 +588,20 @@ public protocol VaneClientProtocol: AnyObject, Sendable {
     func putRequest(url: String, body: Data?) throws  -> VaneResponse
     
     func setCertificatePins(host: String, pins: [String]) throws 
+    
+    /**
+     * Set or clear the resolver. Clears the cached TCP client AND drains the
+     * H3 connection pool and any warmup state — same lifecycle as a pin
+     * change — so no pooled connection resolved under the old resolver (or
+     * no resolver) survives the switch.
+     *
+     * Precedence per lookup: `dns_overrides` (exact host match) → this
+     * resolver → system; overrides are the more specific, deterministic
+     * instruction and the resolver is never consulted for a host they name.
+     * "Set it before the first request" is the documented fast path; setting
+     * it later is correct, just costs the pools.
+     */
+    func setDnsResolver(resolver: VaneDnsResolver?) 
     
     /**
      * Pays the client's one-time setup and connection cost up front — call it
@@ -763,6 +783,26 @@ open func setCertificatePins(host: String, pins: [String])throws   {try rustCall
 }
     
     /**
+     * Set or clear the resolver. Clears the cached TCP client AND drains the
+     * H3 connection pool and any warmup state — same lifecycle as a pin
+     * change — so no pooled connection resolved under the old resolver (or
+     * no resolver) survives the switch.
+     *
+     * Precedence per lookup: `dns_overrides` (exact host match) → this
+     * resolver → system; overrides are the more specific, deterministic
+     * instruction and the resolver is never consulted for a host they name.
+     * "Set it before the first request" is the documented fast path; setting
+     * it later is correct, just costs the pools.
+     */
+open func setDnsResolver(resolver: VaneDnsResolver?)  {try! rustCall() {
+    uniffi_vane_fn_method_vaneclient_set_dns_resolver(
+            self.uniffiCloneHandle(),
+        FfiConverterOptionTypeVaneDnsResolver.lower(resolver),$0
+    )
+}
+}
+    
+    /**
      * Pays the client's one-time setup and connection cost up front — call it
      * once at app startup, from a background thread (it blocks, exactly like
      * `execute_request`), so the first real request doesn't pay it.
@@ -838,6 +878,254 @@ public func FfiConverterTypeVaneClient_lift(_ handle: UInt64) throws -> VaneClie
 #endif
 public func FfiConverterTypeVaneClient_lower(_ value: VaneClient) -> UInt64 {
     return FfiConverterTypeVaneClient.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A caller-supplied DNS resolver, consulted for every host between the
+ * `dns_overrides` map and the system resolver. Install one with
+ * [`VaneClient::set_dns_resolver`]; precedence is always
+ * `dns_overrides` (exact host match) → this resolver → system.
+ */
+public protocol VaneDnsResolver: AnyObject, Sendable {
+    
+    /**
+     * Return IP address literals for `host` ("203.0.113.7", "2001:db8::1").
+     * No ports, no hostnames.
+     *
+     * Threading, per binding — know your thread before you block:
+     * - Dart: a native worker thread paired with a worker isolate; the main
+     * isolate is never blocked by requests.
+     * - Swift/Kotlin, H3 path: the CALLER's thread of the sync
+     * `execute_request` — possibly the platform main thread on iOS.
+     * - Swift/Kotlin, TCP path: tokio's blocking pool, via `spawn_blocking`
+     * (the reqwest resolver adapter) — never the caller's thread.
+     *
+     * Rules: must not invoke Vane requests (deadlock — it runs on the thread
+     * that owns the in-flight request); must not block on work scheduled on
+     * the platform main thread, because on iOS the callback may itself be
+     * running there (the sync-execute case above).
+     *
+     * Failure is loud, never a silent fallback: an empty list or any entry
+     * that is not an IP literal fails the resolution with a Transport error.
+     * The system resolver is never consulted once a resolver is installed.
+     */
+    func resolve(host: String)  -> [String]
+    
+}
+/**
+ * A caller-supplied DNS resolver, consulted for every host between the
+ * `dns_overrides` map and the system resolver. Install one with
+ * [`VaneClient::set_dns_resolver`]; precedence is always
+ * `dns_overrides` (exact host match) → this resolver → system.
+ */
+open class VaneDnsResolverImpl: VaneDnsResolver, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_vane_fn_clone_vanednsresolver(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_vane_fn_free_vanednsresolver(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Return IP address literals for `host` ("203.0.113.7", "2001:db8::1").
+     * No ports, no hostnames.
+     *
+     * Threading, per binding — know your thread before you block:
+     * - Dart: a native worker thread paired with a worker isolate; the main
+     * isolate is never blocked by requests.
+     * - Swift/Kotlin, H3 path: the CALLER's thread of the sync
+     * `execute_request` — possibly the platform main thread on iOS.
+     * - Swift/Kotlin, TCP path: tokio's blocking pool, via `spawn_blocking`
+     * (the reqwest resolver adapter) — never the caller's thread.
+     *
+     * Rules: must not invoke Vane requests (deadlock — it runs on the thread
+     * that owns the in-flight request); must not block on work scheduled on
+     * the platform main thread, because on iOS the callback may itself be
+     * running there (the sync-execute case above).
+     *
+     * Failure is loud, never a silent fallback: an empty list or any entry
+     * that is not an IP literal fails the resolution with a Transport error.
+     * The system resolver is never consulted once a resolver is installed.
+     */
+open func resolve(host: String) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_vane_fn_method_vanednsresolver_resolve(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(host),$0
+    )
+})
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceVaneDnsResolver {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceVaneDnsResolver = UniffiVTableCallbackInterfaceVaneDnsResolver(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeVaneDnsResolver.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface VaneDnsResolver: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeVaneDnsResolver.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface VaneDnsResolver: handle missing in uniffiClone")
+            }
+        },
+        resolve: { (
+            uniffiHandle: UInt64,
+            host: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> [String] in
+                guard let uniffiObj = try? FfiConverterTypeVaneDnsResolver.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.resolve(
+                     host: try FfiConverterString.lift(host)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterSequenceString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceVaneDnsResolver> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceVaneDnsResolver>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitVaneDnsResolver() {
+    uniffi_vane_fn_init_callback_vtable_vanednsresolver(UniffiCallbackInterfaceVaneDnsResolver.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVaneDnsResolver: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<VaneDnsResolver>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = VaneDnsResolver
+
+    public static func lift(_ handle: UInt64) throws -> VaneDnsResolver {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return VaneDnsResolverImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: VaneDnsResolver) -> UInt64 {
+         if let rustImpl = value as? VaneDnsResolverImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VaneDnsResolver {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: VaneDnsResolver, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneDnsResolver_lift(_ handle: UInt64) throws -> VaneDnsResolver {
+    return try FfiConverterTypeVaneDnsResolver.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVaneDnsResolver_lower(_ value: VaneDnsResolver) -> UInt64 {
+    return FfiConverterTypeVaneDnsResolver.lower(value)
 }
 
 
@@ -2202,6 +2490,30 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeVaneDnsResolver: FfiConverterRustBuffer {
+    typealias SwiftType = VaneDnsResolver?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVaneDnsResolver.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVaneDnsResolver.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeVaneClientCertificate: FfiConverterRustBuffer {
     typealias SwiftType = VaneClientCertificate?
 
@@ -2565,7 +2877,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_vane_checksum_method_vaneclient_set_certificate_pins() != 37780) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_vane_checksum_method_vaneclient_set_dns_resolver() != 25071) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vane_checksum_method_vaneclient_warmup() != 42407) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vane_checksum_method_vanednsresolver_resolve() != 29485) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vane_checksum_method_vaneresponsestream_close_stream() != 16563) {
@@ -2578,6 +2896,7 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
 
+    uniffiCallbackInitVaneDnsResolver()
     return InitializationResult.ok
 }()
 
