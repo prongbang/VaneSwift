@@ -1093,6 +1093,12 @@ private func formEncode(_ value: String) -> String {
 public class VaneConfigurationBuilder {
     private var config = createDefaultConfig()
 
+    // Explicit and public: without it Swift synthesises an *internal*
+    // initializer, so nothing outside this package can build a
+    // configuration at all. Caught by the clean-app check, not by the
+    // package's own tests -- they live inside the module and see internal.
+    public init() {}
+
     public func baseURL(_ url: String) -> VaneConfigurationBuilder {
         config.baseUrl = url
         return self
