@@ -1188,6 +1188,22 @@ public class VaneConfigurationBuilder {
         return self
     }
 
+    /// Bounds an HTTP/3 request by time without forward progress instead of by
+    /// total duration, so an upload or download larger than `timeout` can move
+    /// as long as it keeps moving.
+    ///
+    /// This replaces the absolute deadline rather than adding to it: with it
+    /// set, nothing caps a request's total duration and a peer willing to
+    /// dribble bytes can hold one open. QUIC's idle timeout, armed from the
+    /// same value, still kills a peer that goes entirely silent.
+    ///
+    /// HTTP/3 only. The TCP path cannot observe upload progress to reset
+    /// against and stays on `timeout`.
+    public func inactivityTimeout(_ seconds: UInt64) -> VaneConfigurationBuilder {
+        config.inactivityTimeoutSeconds = seconds
+        return self
+    }
+
     public func userAgent(_ agent: String) -> VaneConfigurationBuilder {
         config.userAgent = agent
         return self

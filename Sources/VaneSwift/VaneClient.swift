@@ -1461,6 +1461,32 @@ public struct VaneClientConfig: Equatable, Hashable {
      * Client certificate (mTLS) presented to the origin on both stacks.
      */
     public var clientCertificate: VaneClientCertificate?
+    /**
+     * Seconds of no forward progress after which an HTTP/3 request fails,
+     * instead of `timeout_seconds` bounding the request as a whole.
+     *
+     * `None` (the default) keeps the historical behaviour exactly:
+     * `timeout_seconds` is an absolute deadline covering handshake, upload
+     * and download together, so a body larger than the link can move in that
+     * window fails however healthy the connection is.
+     *
+     * `Some(n)` trades that bound for a progress-based one: the request may
+     * run as long as it keeps moving, and fails after `n` seconds in which
+     * nothing was uploaded, nothing was downloaded and no state advanced.
+     * It is opt-in because it is a real loosening — nothing then caps a
+     * request's total duration, and a peer willing to dribble one byte per
+     * interval can hold it open. The transport-level backstop still applies:
+     * QUIC's idle timeout is armed from the same value, so a peer that goes
+     * entirely silent still kills the connection.
+     *
+     * HTTP/3 only. reqwest wraps body-send and header-send in one call, so
+     * the TCP path cannot observe upload progress to reset anything against;
+     * it stays on the absolute deadline. Documented rather than rejected, on
+     * the `tls_min_version` precedent — a knob that one transport enforces
+     * and the other cannot is a fact about the transports, not a caller
+     * error.
+     */
+    public var inactivityTimeoutSeconds: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1496,7 +1522,32 @@ public struct VaneClientConfig: Equatable, Hashable {
          */customRootCertificates: [String] = [], 
         /**
          * Client certificate (mTLS) presented to the origin on both stacks.
-         */clientCertificate: VaneClientCertificate? = nil) {
+         */clientCertificate: VaneClientCertificate? = nil, 
+        /**
+         * Seconds of no forward progress after which an HTTP/3 request fails,
+         * instead of `timeout_seconds` bounding the request as a whole.
+         *
+         * `None` (the default) keeps the historical behaviour exactly:
+         * `timeout_seconds` is an absolute deadline covering handshake, upload
+         * and download together, so a body larger than the link can move in that
+         * window fails however healthy the connection is.
+         *
+         * `Some(n)` trades that bound for a progress-based one: the request may
+         * run as long as it keeps moving, and fails after `n` seconds in which
+         * nothing was uploaded, nothing was downloaded and no state advanced.
+         * It is opt-in because it is a real loosening — nothing then caps a
+         * request's total duration, and a peer willing to dribble one byte per
+         * interval can hold it open. The transport-level backstop still applies:
+         * QUIC's idle timeout is armed from the same value, so a peer that goes
+         * entirely silent still kills the connection.
+         *
+         * HTTP/3 only. reqwest wraps body-send and header-send in one call, so
+         * the TCP path cannot observe upload progress to reset anything against;
+         * it stays on the absolute deadline. Documented rather than rejected, on
+         * the `tls_min_version` precedent — a knob that one transport enforces
+         * and the other cannot is a fact about the transports, not a caller
+         * error.
+         */inactivityTimeoutSeconds: UInt64? = nil) {
         self.baseUrl = baseUrl
         self.defaultHeaders = defaultHeaders
         self.dnsOverrides = dnsOverrides
@@ -1523,6 +1574,7 @@ public struct VaneClientConfig: Equatable, Hashable {
         self.tlsMaxVersion = tlsMaxVersion
         self.customRootCertificates = customRootCertificates
         self.clientCertificate = clientCertificate
+        self.inactivityTimeoutSeconds = inactivityTimeoutSeconds
     }
 
     
@@ -1566,7 +1618,8 @@ public struct FfiConverterTypeVaneClientConfig: FfiConverterRustBuffer {
                 tlsMinVersion: FfiConverterOptionTypeVaneTlsVersion.read(from: &buf), 
                 tlsMaxVersion: FfiConverterOptionTypeVaneTlsVersion.read(from: &buf), 
                 customRootCertificates: FfiConverterSequenceString.read(from: &buf), 
-                clientCertificate: FfiConverterOptionTypeVaneClientCertificate.read(from: &buf)
+                clientCertificate: FfiConverterOptionTypeVaneClientCertificate.read(from: &buf), 
+                inactivityTimeoutSeconds: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -1597,6 +1650,7 @@ public struct FfiConverterTypeVaneClientConfig: FfiConverterRustBuffer {
         FfiConverterOptionTypeVaneTlsVersion.write(value.tlsMaxVersion, into: &buf)
         FfiConverterSequenceString.write(value.customRootCertificates, into: &buf)
         FfiConverterOptionTypeVaneClientCertificate.write(value.clientCertificate, into: &buf)
+        FfiConverterOptionUInt64.write(value.inactivityTimeoutSeconds, into: &buf)
     }
 }
 
